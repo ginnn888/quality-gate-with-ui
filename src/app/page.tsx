@@ -4,7 +4,6 @@ import { useState } from "react";
 import { FolderGit2, Loader2, Upload } from "lucide-react";
 import { Dropzone, type UploadFile } from "@/components/Dropzone";
 import { ConfigPanel } from "@/components/ConfigPanel";
-import { HistorySidebar } from "@/components/HistorySidebar";
 import { ReportView } from "@/components/ReportView";
 import { RepoPicker } from "@/components/RepoPicker";
 import { RepoFilePicker } from "@/components/RepoFilePicker";
@@ -33,7 +32,6 @@ export default function HomePage() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [run, setRun] = useState<RunRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [historyKey, setHistoryKey] = useState(0);
 
   const busy = phase === "running";
   const count = mode === "repo" ? repoFiles.length : files.length;
@@ -72,7 +70,6 @@ export default function HomePage() {
       if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
       setRun(data as RunRecord);
       setPhase("done");
-      setHistoryKey((k) => k + 1);
     } catch (e: any) {
       setError(e.message || "Something went wrong");
       setPhase("error");
@@ -81,14 +78,18 @@ export default function HomePage() {
 
   return (
     <div className="space-y-8">
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="mx-auto max-w-3xl">
         <div className="min-w-0 space-y-6">
           <section>
             <h1 className="text-xl font-bold text-gate-text">Run the Quality Gate on your code</h1>
             <p className="mt-1 text-sm text-gate-muted">
-              Pick one of your GitHub repositories, choose the files to check, and the gate runs
-              npm audit, an AI code review, a coverage gate and the SonarCloud check — then shows
-              you the same report GitHub would post on a pull request.
+              A one-off run: pick a repository and files (or upload files), and the gate runs npm
+              audit, an AI code review, a coverage gate and the SonarCloud check. To run the gate
+              automatically on every push and pull request,{" "}
+              <a href="/repos" className="text-gate-accent hover:underline">
+                install it onto a repository
+              </a>{" "}
+              instead.
             </p>
           </section>
 
@@ -172,8 +173,6 @@ export default function HomePage() {
             </div>
           )}
         </div>
-
-        <HistorySidebar refreshKey={historyKey} />
       </div>
 
       {run && phase === "done" && (

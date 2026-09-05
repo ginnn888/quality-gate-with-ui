@@ -7,8 +7,12 @@ import GitHub from "next-auth/providers/github";
 // session.
 //
 // The `repo` scope is what lets the console list and read a user's private
-// repositories; without it GitHub only returns public ones.
-const SCOPES = "read:user user:email repo";
+// repositories; without it GitHub only returns public ones. The `workflow`
+// scope is required on top of `repo` to create or update files under
+// `.github/workflows/` via the Contents API — that is how the console
+// "installs" the quality gate onto a repository. Existing sessions must sign
+// out and back in once to grant it.
+const SCOPES = "read:user user:email repo workflow";
 
 declare module "next-auth" {
   interface Session {

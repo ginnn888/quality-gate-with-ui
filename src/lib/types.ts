@@ -88,6 +88,62 @@ export interface RunConfig {
   enableAiReview: boolean;
 }
 
+/** GitHub events the installed workflow reacts to. */
+export type GateEvent = "push" | "pull_request";
+
+/**
+ * The thresholds + trigger config the console commits to a repo as
+ * `quality-gate.config.json` when the gate is installed. A superset of
+ * `RunConfig`: the extra fields drive how the workflow YAML is generated.
+ */
+export interface GateConfig extends RunConfig {
+  /** branches the workflow runs on (push + pull_request targets) */
+  branches: string[];
+  events: GateEvent[];
+}
+
+/** One repository the console has installed the quality gate onto. */
+export interface InstallationRecord {
+  fullName: string;
+  owner: string;
+  name: string;
+  private: boolean;
+  htmlUrl: string;
+  defaultBranch: string;
+  installedBy: RunOwner;
+  installedAt: string;
+  updatedAt: string;
+  config: GateConfig;
+  workflowPath: string;
+  configPath: string;
+}
+
+export interface InstallationSummaryRow {
+  fullName: string;
+  owner: string;
+  name: string;
+  private: boolean;
+  htmlUrl: string;
+  defaultBranch: string;
+  branches: string[];
+  installedAt: string;
+  updatedAt: string;
+  globalCoverage: number;
+}
+
+/** A GitHub Actions workflow run, as shown on the installation detail page. */
+export interface WorkflowRunRow {
+  id: number;
+  runNumber: number;
+  status: string;
+  conclusion: string | null;
+  event: string;
+  headBranch: string | null;
+  headSha: string;
+  htmlUrl: string;
+  createdAt: string;
+}
+
 /** Where the analysed code came from. */
 export interface RunSource {
   kind: "upload" | "repo";

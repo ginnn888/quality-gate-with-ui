@@ -1,0 +1,35 @@
+name: "Automated Quality Gate"
+description: "Runs the AI-driven quality gate (static analysis, npm audit, optional Gemini review + coverage gate) on changed source files."
+author: "quality-gate-with-ui"
+branding:
+  icon: "shield"
+  color: "green"
+
+inputs:
+  config-path:
+    description: "Path to quality-gate.config.json in the consumer repo."
+    required: false
+    default: "quality-gate.config.json"
+  gemini-api-key:
+    description: "Google Gemini API key. When set, the gate runs the live AI engine; otherwise it runs the dependency-free simulation."
+    required: false
+    default: ""
+  github-token:
+    description: "GitHub token (usually secrets.GITHUB_TOKEN)."
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: "20"
+    - name: Run quality gate
+      shell: bash
+      env:
+        QG_CONFIG_PATH: ${{ inputs.config-path }}
+        QG_GEMINI_KEY: ${{ inputs.gemini-api-key }}
+        QG_GH_TOKEN: ${{ inputs.github-token }}
+      run: node "$GITHUB_ACTION_PATH/runner.mjs"
