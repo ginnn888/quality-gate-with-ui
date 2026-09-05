@@ -1,0 +1,31 @@
+{
+  "name": "quality-gate-ui",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Web UI for the Automated Quality Gate — upload code, run the gate, read the report without touching GitHub.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "lucide-react": "^1.41.0",
+    "next": "^15.5.25",
+    "next-auth": "^5.0.0-beta.32",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-markdown": "9.0.1",
+    "remark-gfm": "4.0.0",
+    "sonarqube-scanner": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "20.14.10",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "autoprefixer": "10.4.19",
+    "postcss": "8.4.39",
+    "tailwindcss": "3.4.6",
+    "typescript": "5.5.3"
+  }
+}

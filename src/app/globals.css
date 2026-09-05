@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  background: #f8f7fd;
+  background-image:
+    radial-gradient(560px circle at 8% -10%, rgba(124, 111, 239, 0.10), transparent 60%),
+    radial-gradient(520px circle at 100% 0%, rgba(79, 140, 247, 0.10), transparent 55%);
+  background-attachment: fixed;
+  color: #211f35;
+}
+
+/* Markdown report styling (react-markdown output) */
+.md-report h1 { font-size: 1.35rem; font-weight: 700; margin: 1rem 0 0.5rem; color: #211f35; }
+.md-report h2 { font-size: 1.1rem; font-weight: 700; margin: 1.25rem 0 0.5rem; color: #211f35; }
+.md-report h3 { font-size: 1rem; font-weight: 700; margin: 1rem 0 0.4rem; color: #211f35; }
+.md-report h4 { font-size: 0.95rem; font-weight: 600; margin: 0.8rem 0 0.3rem; color: #6e6b85; }
+.md-report p { margin: 0.4rem 0; line-height: 1.6; }
+.md-report ul { list-style: disc; padding-left: 1.4rem; margin: 0.4rem 0; }
+.md-report li { margin: 0.15rem 0; }
+.md-report hr { border: 0; border-top: 1px solid #e7e3f6; margin: 1rem 0; }
+.md-report a { color: #7c6fef; }
+.md-report code {
+  background: #efecfd;
+  color: #4c3fa3;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  font-size: 0.85em;
+}
+.md-report pre {
+  background: #f8f7fd;
+  border: 1px solid #e7e3f6;
+  border-radius: 8px;
+  padding: 0.8rem;
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+.md-report pre code { background: transparent; padding: 0; color: inherit; }
+.md-report blockquote {
+  border-left: 3px solid #e7e3f6;
+  padding-left: 0.8rem;
+  color: #6e6b85;
+  margin: 0.5rem 0;
+}
+.md-report table { border-collapse: collapse; margin: 0.6rem 0; width: 100%; display: block; overflow-x: auto; }
+.md-report th, .md-report td { border: 1px solid #e7e3f6; padding: 0.4rem 0.7rem; text-align: left; }
+.md-report th { background: #f8f7fd; }
