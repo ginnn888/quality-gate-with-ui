@@ -1,0 +1,9 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+# The Next.js runtime turns App Router SSR, API routes and middleware into
+# Netlify Functions/Edge Functions. Without it Netlify serves the repo as a
+# static site and every route 404s ("Page not found").
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
