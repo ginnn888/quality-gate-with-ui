@@ -7,9 +7,8 @@ import type { CoverageConfig, GateEvent, WorkflowTriggers } from "./types";
 export const WORKFLOW_PATH = ".github/workflows/quality-gate.yml";
 export const CONFIG_PATH = "config_cov.json";
 
-/** The Automated Quality Gate is committed into the target repo as a local action here. */
+/** The Automated Quality Gate bundle is committed into the target repo here. */
 export const ACTION_DIR = ".quality-gate";
-export const ACTION_USES = `./${ACTION_DIR}`;
 /** Every file the console writes into a target repo, for drift checks + uninstall. */
 export const MANAGED_PATHS = [
   WORKFLOW_PATH,
@@ -105,41 +104,52 @@ jobs:
   quality-gate:
     runs-on: ubuntu-latest
     env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      GEMINI_API_KEY: \${{ secrets.GEMINI_API_KEY }}
       SONAR_TOKEN: \${{ secrets.SONAR_TOKEN }}
+      GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
+      # Only when this repo is actually an npm project. A repo without a
+      # package.json still runs the gate — it just has nothing to test.
       - name: Install dependencies
         run: |
           if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
             npm ci
-          else
+          elif [ -f package.json ]; then
             npm install
+          else
+            echo "::notice::No package.json in this repository — skipping dependency install."
           fi
 
-      # SonarCloud runs only when a SONAR_TOKEN repo secret is set.
+      # Phase 1: AI review + test generation + coverage/audit gate. Writes state.
+      - name: Quality Gate (prepare)
+        if: always()
+        run: node ${ACTION_DIR}/dist/index.js --prepare
+
+      # SonarCloud runs only when a SONAR_TOKEN repo secret is set; a missing
+      # sonar-project.properties must not fail the whole workflow.
       - name: SonarCloud Scan
-        if: env.SONAR_TOKEN != ''
+        if: \${{ always() && env.SONAR_TOKEN != '' }}
+        continue-on-error: true
         uses: sonarsource/sonarqube-scan-action@v6
         env:
           GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: \${{ secrets.SONAR_TOKEN }}
 
-      # The Automated Quality Gate itself, committed into this repo under
-      # ${ACTION_DIR}/ by the Quality Gate console. Update or remove it from there.
-      - name: Automated Quality Gate
-        uses: ${ACTION_USES}
-        with:
-          gemini_api_key: \${{ secrets.GEMINI_API_KEY }}
-          sonar_token: \${{ secrets.SONAR_TOKEN }}
-          github_token: \${{ secrets.GITHUB_TOKEN }}
+      # Phase 2: fetch Sonar status, assemble the report, post it to the PR,
+      # and exit non-zero when the gate failed.
+      - name: Quality Gate (report)
+        if: always()
+        run: node ${ACTION_DIR}/dist/index.js --report
 `;
 }

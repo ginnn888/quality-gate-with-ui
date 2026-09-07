@@ -65,7 +65,7 @@ Installing makes **one commit** to the default branch with:
 | --- | --- |
 | `.github/workflows/quality-gate.yml` | Runs on the configured `push` / `pull_request` events. |
 | `config_cov.json` | `{ "global": 80, "files": { "src/x.js": 50 } }` — the coverage targets. |
-| `.quality-gate/` | The gate itself — `action.yml` + the ncc-bundled `dist/index.js`, vendored from `vendor/quality-gate-action/` in this repo. The workflow runs it with `uses: ./.quality-gate`, so there is no published action to depend on. |
+| `.quality-gate/` | The gate itself — the ncc-bundled `dist/index.js` (plus `action.yml`), vendored from `vendor/quality-gate-action/`. The workflow runs it directly, so there is no published action to depend on. |
 
 ### There is no local database
 
@@ -79,17 +79,25 @@ provision, nothing to persist.
 
 `vendor/quality-gate-action/` holds `action.yml` and `dist/index.js` — the
 Automated Quality Gate compiled to a single dependency-free bundle (ncc). The
-console commits these into every installed repo under `.quality-gate/` and the
-generated workflow calls them locally:
+console commits these into every installed repo under `.quality-gate/`. The
+generated workflow mirrors the project's own `ci.yaml` — a tolerant
+`npm ci`/`install`/skip, then the two-phase run:
 
 ```yaml
-      - name: Automated Quality Gate
-        uses: ./.quality-gate
-        with:
-          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
-          sonar_token: ${{ secrets.SONAR_TOKEN }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Quality Gate (prepare)
+        if: always()
+        run: node .quality-gate/dist/index.js --prepare
+      # …SonarCloud scan (only if SONAR_TOKEN set)…
+      - name: Quality Gate (report)
+        if: always()
+        run: node .quality-gate/dist/index.js --report
 ```
+
+`--prepare` does the AI review + test-gen + coverage/audit gate and writes state;
+`--report` fetches the Sonar status, posts the report comment to the PR, and
+exits non-zero on a failing gate. Keys come from job-level `env:` mapped from the
+repo secrets. A repo with no `package.json` / no changed `src/` files still runs
+green (the gate reports "skipped").
 
 To ship a new version of the gate, drop the rebuilt files into
 `vendor/quality-gate-action/` and redeploy; the detail page's **Save changes** /
