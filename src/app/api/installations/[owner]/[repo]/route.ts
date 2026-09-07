@@ -126,19 +126,15 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const triggers = normalizeTriggers(body?.triggers ?? record.triggers);
   const branch = record.defaultBranch;
 
-  const triggersChanged =
-    JSON.stringify(record.triggers.branches) !== JSON.stringify(triggers.branches) ||
-    JSON.stringify(record.triggers.events) !== JSON.stringify(triggers.events);
-  const needsAction = body?.repairAction || !record.hasAction || !record.hasConfig;
-
   try {
+    // Always rewrite the workflow + config (idempotent, tiny) so template
+    // changes reach existing installs on any Save. Re-commit the action bundle
+    // too when it has drifted or a repair was asked for.
     const files: { path: string; contentUtf8: string }[] = [
+      { path: WORKFLOW_PATH, contentUtf8: buildWorkflowYaml(triggers) },
       { path: CONFIG_PATH, contentUtf8: buildCoverageConfigJson(coverage) },
     ];
-    if (triggersChanged) {
-      files.push({ path: WORKFLOW_PATH, contentUtf8: buildWorkflowYaml(triggers) });
-    }
-    if (needsAction) {
+    if (body?.repairAction || !record.hasAction) {
       files.push(...(await readVendoredAction()));
     }
     await commitFiles(token, owner, repo, branch, files, "Update Automated Quality Gate");

@@ -224,8 +224,9 @@ export default function InstallationDetailPage() {
               Save changes
             </button>
             <p className="text-[11px] text-gate-muted">
-              Saving commits an updated <span className="font-mono">config_cov.json</span> (and the
-              workflow file too when the branch/event list changes).
+              Saving re-commits <span className="font-mono">config_cov.json</span> and{" "}
+              <span className="font-mono">.github/workflows/quality-gate.yml</span> (and repairs the
+              gate bundle if it&apos;s missing) — use it to pull in console updates too.
             </p>
           </div>
 
