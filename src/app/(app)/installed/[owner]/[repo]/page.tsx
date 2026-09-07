@@ -173,13 +173,23 @@ export default function InstallationDetailPage() {
         </div>
       ) : (
         <>
-          {!record.hasConfig && (
+          {(!record.hasConfig || !record.hasAction) && (
             <div className="flex items-center gap-3 rounded-lg border border-gate-warn/40 bg-gate-warn/10 p-3 text-sm text-gate-warn">
               <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
               <span>
-                <span className="font-mono">config_cov.json</span> is missing on{" "}
-                <span className="font-mono">{record.defaultBranch}</span>. Save below to re-commit
-                it.
+                {!record.hasAction ? (
+                  <>
+                    The gate action under <span className="font-mono">.quality-gate/</span> is
+                    missing on <span className="font-mono">{record.defaultBranch}</span> — the
+                    workflow will fail.{" "}
+                  </>
+                ) : (
+                  <>
+                    <span className="font-mono">config_cov.json</span> is missing on{" "}
+                    <span className="font-mono">{record.defaultBranch}</span>.{" "}
+                  </>
+                )}
+                Click <strong>Save changes</strong> to re-commit it.
               </span>
             </div>
           )}

@@ -219,6 +219,83 @@ export async function deleteFile(
   });
 }
 
+// ── multi-file commits (Git Data API) ─────────────────────────────────────
+// Add / delete several files in ONE commit instead of one commit per file.
+
+type TreeEntry = { path: string; mode: "100644"; type: "blob"; sha: string | null };
+
+async function commitTree(
+  token: string,
+  owner: string,
+  repo: string,
+  branch: string,
+  tree: TreeEntry[],
+  message: string,
+): Promise<void> {
+  const ref = await gh<{ object: { sha: string } }>(
+    token,
+    `/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(branch)}`,
+  );
+  const parentSha = ref.object.sha;
+  const parent = await gh<{ tree: { sha: string } }>(
+    token,
+    `/repos/${owner}/${repo}/git/commits/${parentSha}`,
+  );
+  const newTree = await ghSend<{ sha: string }>(token, "POST", `/repos/${owner}/${repo}/git/trees`, {
+    base_tree: parent.tree.sha,
+    tree,
+  });
+  const commit = await ghSend<{ sha: string }>(
+    token,
+    "POST",
+    `/repos/${owner}/${repo}/git/commits`,
+    { message, tree: newTree.sha, parents: [parentSha] },
+  );
+  await ghSend(
+    token,
+    "PATCH",
+    `/repos/${owner}/${repo}/git/refs/heads/${encodeURIComponent(branch)}`,
+    { sha: commit.sha },
+  );
+}
+
+/** Create/update several files in a single commit on `branch`. */
+export async function commitFiles(
+  token: string,
+  owner: string,
+  repo: string,
+  branch: string,
+  files: { path: string; contentUtf8: string }[],
+  message: string,
+): Promise<void> {
+  const tree = await Promise.all(
+    files.map(async (f): Promise<TreeEntry> => {
+      const blob = await ghSend<{ sha: string }>(
+        token,
+        "POST",
+        `/repos/${owner}/${repo}/git/blobs`,
+        { content: Buffer.from(f.contentUtf8, "utf8").toString("base64"), encoding: "base64" },
+      );
+      return { path: f.path, mode: "100644", type: "blob", sha: blob.sha };
+    }),
+  );
+  await commitTree(token, owner, repo, branch, tree, message);
+}
+
+/** Delete several files in a single commit. Missing paths make GitHub 422 — filter first. */
+export async function deleteFiles(
+  token: string,
+  owner: string,
+  repo: string,
+  branch: string,
+  paths: string[],
+  message: string,
+): Promise<void> {
+  if (paths.length === 0) return;
+  const tree: TreeEntry[] = paths.map((p) => ({ path: p, mode: "100644", type: "blob", sha: null }));
+  await commitTree(token, owner, repo, branch, tree, message);
+}
+
 // ── Actions: workflow runs ─────────────────────────────────────────────────
 
 function mapRun(r: any): WorkflowRunRow {

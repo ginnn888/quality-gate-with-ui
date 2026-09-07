@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { getContentMeta, getRepo, putFile } from "@/lib/github";
+import { commitFiles, getRepo } from "@/lib/github";
 import { getInstalledRepo, listInstalledRepos } from "@/lib/installations";
 import { setRepoSecret } from "@/lib/githubSecrets";
+import { readVendoredAction } from "@/lib/qgAction";
 import {
-  CONFIG_PATH,
-  WORKFLOW_PATH,
   buildCoverageConfigJson,
   buildWorkflowYaml,
+  CONFIG_PATH,
+  WORKFLOW_PATH,
   normalizeCoverageConfig,
   normalizeTriggers,
 } from "@/lib/workflowTemplate";
@@ -30,8 +31,9 @@ export async function GET() {
   }
 }
 
-// POST /api/installations — commit the workflow + config_cov.json to a repo and
-// set the GEMINI_API_KEY / SONAR_TOKEN repo secrets the action needs.
+// POST /api/installations — commit the workflow, config_cov.json and the vendored
+// Automated Quality Gate action into a repo (one commit), and set the
+// GEMINI_API_KEY / SONAR_TOKEN repo secrets the action needs.
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.accessToken) {
@@ -55,8 +57,10 @@ export async function POST(req: NextRequest) {
   const repo = String(body.repo).trim();
   const coverage = normalizeCoverageConfig(body.coverage);
   const triggers = normalizeTriggers(body.triggers);
-  const geminiApiKey = (body.geminiApiKey ?? "").trim();
-  const sonarToken = (body.sonarToken ?? "").trim();
+
+  // The console's own env vars are the fallback for both secrets.
+  const geminiApiKey = (body.geminiApiKey ?? "").trim() || (process.env.GEMINI_API_KEY ?? "").trim();
+  const sonarToken = (body.sonarToken ?? "").trim() || (process.env.SONAR_TOKEN ?? "").trim();
 
   try {
     const meta = await getRepo(token, owner, repo);
@@ -68,22 +72,19 @@ export async function POST(req: NextRequest) {
     }
     const branch = meta.defaultBranch;
 
-    const existingWorkflow = await getContentMeta(token, owner, repo, WORKFLOW_PATH, branch);
-    const existingConfig = await getContentMeta(token, owner, repo, CONFIG_PATH, branch);
-    const verb = existingWorkflow ? "Update" : "Add";
-
-    await putFile(token, owner, repo, WORKFLOW_PATH, {
-      message: `${verb} Quality Gate workflow`,
-      contentUtf8: buildWorkflowYaml(triggers),
-      sha: existingWorkflow?.sha,
+    const actionFiles = await readVendoredAction();
+    await commitFiles(
+      token,
+      owner,
+      repo,
       branch,
-    });
-    await putFile(token, owner, repo, CONFIG_PATH, {
-      message: `${verb} Quality Gate coverage config`,
-      contentUtf8: buildCoverageConfigJson(coverage),
-      sha: existingConfig?.sha,
-      branch,
-    });
+      [
+        { path: WORKFLOW_PATH, contentUtf8: buildWorkflowYaml(triggers) },
+        { path: CONFIG_PATH, contentUtf8: buildCoverageConfigJson(coverage) },
+        ...actionFiles,
+      ],
+      "Install Automated Quality Gate",
+    );
 
     const warnings: string[] = [];
     for (const [name, value] of [
@@ -103,7 +104,7 @@ export async function POST(req: NextRequest) {
     }
     if (!geminiApiKey) {
       warnings.push(
-        "No GEMINI_API_KEY provided — the gate cannot run until that repo secret is set.",
+        "No Gemini API key available (none provided and GEMINI_API_KEY is not set on the console) — the gate cannot run until that repo secret is set.",
       );
     }
 

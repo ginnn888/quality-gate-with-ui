@@ -7,6 +7,17 @@ import type { CoverageConfig, GateEvent, WorkflowTriggers } from "./types";
 export const WORKFLOW_PATH = ".github/workflows/quality-gate.yml";
 export const CONFIG_PATH = "config_cov.json";
 
+/** The Automated Quality Gate is committed into the target repo as a local action here. */
+export const ACTION_DIR = ".quality-gate";
+export const ACTION_USES = `./${ACTION_DIR}`;
+/** Every file the console writes into a target repo, for drift checks + uninstall. */
+export const MANAGED_PATHS = [
+  WORKFLOW_PATH,
+  CONFIG_PATH,
+  `${ACTION_DIR}/action.yml`,
+  `${ACTION_DIR}/dist/index.js`,
+];
+
 export const DEFAULT_COVERAGE: CoverageConfig = { global: 80, files: {} };
 export const DEFAULT_TRIGGERS: WorkflowTriggers = {
   branches: ["main"],
@@ -122,20 +133,13 @@ jobs:
           GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: \${{ secrets.SONAR_TOKEN }}
 
-      # ────────────────────────────────────────────────────────────────────
-      # SKIP — Automated Quality Gate action reference not wired up yet.
-      # When the published action is ready, replace the step below with:
-      #
-      #   - name: Automated Quality Gate
-      #     uses: <owner>/<repo>@<ref>
-      #     with:
-      #       gemini_api_key: \${{ secrets.GEMINI_API_KEY }}
-      #       sonar_token: \${{ secrets.SONAR_TOKEN }}
-      #       github_token: \${{ secrets.GITHUB_TOKEN }}
-      # ────────────────────────────────────────────────────────────────────
-      - name: Automated Quality Gate (not configured)
-        run: |
-          echo "Quality Gate workflow is installed, but the action reference is not set yet."
-          echo "Edit ${WORKFLOW_PATH} to point the last step at the published action."
+      # The Automated Quality Gate itself, committed into this repo under
+      # ${ACTION_DIR}/ by the Quality Gate console. Update or remove it from there.
+      - name: Automated Quality Gate
+        uses: ${ACTION_USES}
+        with:
+          gemini_api_key: \${{ secrets.GEMINI_API_KEY }}
+          sonar_token: \${{ secrets.SONAR_TOKEN }}
+          github_token: \${{ secrets.GITHUB_TOKEN }}
 `;
 }

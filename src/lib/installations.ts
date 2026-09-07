@@ -13,7 +13,13 @@ import {
   listUserRepos,
   mapLimit,
 } from "./github";
-import { CONFIG_PATH, WORKFLOW_PATH, normalizeCoverageConfig, normalizeTriggers } from "./workflowTemplate";
+import {
+  ACTION_DIR,
+  CONFIG_PATH,
+  WORKFLOW_PATH,
+  normalizeCoverageConfig,
+  normalizeTriggers,
+} from "./workflowTemplate";
 import type {
   CoverageConfig,
   InstalledRepo,
@@ -72,10 +78,11 @@ export async function getInstalledRepo(
 async function readInstalledRepo(token: string, meta: GitHubRepo): Promise<InstalledRepo | null> {
   const branch = meta.defaultBranch;
 
-  const [workflowText, coverageJson, configMeta, secretNames] = await Promise.all([
+  const [workflowText, coverageJson, configMeta, actionMeta, secretNames] = await Promise.all([
     getFileText(token, meta.owner, meta.name, WORKFLOW_PATH, branch),
     getJsonFile<Partial<CoverageConfig>>(token, meta.owner, meta.name, CONFIG_PATH, branch),
     getContentMeta(token, meta.owner, meta.name, CONFIG_PATH, branch),
+    getContentMeta(token, meta.owner, meta.name, `${ACTION_DIR}/dist/index.js`, branch),
     listActionsSecretNames(token, meta.owner, meta.name),
   ]);
 
@@ -92,6 +99,7 @@ async function readInstalledRepo(token: string, meta: GitHubRepo): Promise<Insta
     triggers: parseTriggersFromYaml(workflowText),
     hasWorkflow: true,
     hasConfig: configMeta != null,
+    hasAction: actionMeta != null,
     secrets: secretState(secretNames),
   };
 }

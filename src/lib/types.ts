@@ -49,6 +49,8 @@ export interface InstalledRepo {
   triggers: WorkflowTriggers;
   hasWorkflow: boolean;
   hasConfig: boolean;
+  /** the vendored action files are present under .quality-gate/ */
+  hasAction: boolean;
   secrets: RepoSecretState;
 }
 

@@ -2,18 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import {
   GitHubError,
-  deleteFile,
+  commitFiles,
+  deleteFiles,
   getContentMeta,
   listIssueComments,
   listOpenPullRequests,
   listWorkflowRuns,
   mapLimit,
-  putFile,
 } from "@/lib/github";
 import { getInstalledRepo } from "@/lib/installations";
 import { setRepoSecret } from "@/lib/githubSecrets";
+import { readVendoredAction } from "@/lib/qgAction";
 import {
   CONFIG_PATH,
+  MANAGED_PATHS,
   WORKFLOW_PATH,
   buildCoverageConfigJson,
   buildWorkflowYaml,
@@ -104,8 +106,9 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
   return NextResponse.json({ record, runs, pulls });
 }
 
-// PATCH — change coverage thresholds / triggers (re-commit config_cov.json, and
-// the workflow too when the trigger shape changed). Optionally refresh a secret.
+// PATCH — change coverage / triggers (re-commit config_cov.json, plus the
+// workflow when triggers changed), repair the action files if they drifted, and
+// optionally refresh a secret. All file writes land in one commit.
 export async function PATCH(req: NextRequest, ctx: Ctx) {
   const g = await guard(ctx);
   if ("error" in g) return g.error;
@@ -116,6 +119,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     triggers?: unknown;
     geminiApiKey?: string;
     sonarToken?: string;
+    repairAction?: boolean;
   } | null;
 
   const coverage = normalizeCoverageConfig(body?.coverage ?? record.coverage);
@@ -125,25 +129,19 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const triggersChanged =
     JSON.stringify(record.triggers.branches) !== JSON.stringify(triggers.branches) ||
     JSON.stringify(record.triggers.events) !== JSON.stringify(triggers.events);
+  const needsAction = body?.repairAction || !record.hasAction || !record.hasConfig;
 
   try {
-    const configMeta = await getContentMeta(token, owner, repo, CONFIG_PATH, branch);
-    await putFile(token, owner, repo, CONFIG_PATH, {
-      message: "Update Quality Gate coverage config",
-      contentUtf8: buildCoverageConfigJson(coverage),
-      sha: configMeta?.sha,
-      branch,
-    });
-
+    const files: { path: string; contentUtf8: string }[] = [
+      { path: CONFIG_PATH, contentUtf8: buildCoverageConfigJson(coverage) },
+    ];
     if (triggersChanged) {
-      const workflowMeta = await getContentMeta(token, owner, repo, WORKFLOW_PATH, branch);
-      await putFile(token, owner, repo, WORKFLOW_PATH, {
-        message: "Update Quality Gate workflow triggers",
-        contentUtf8: buildWorkflowYaml(triggers),
-        sha: workflowMeta?.sha,
-        branch,
-      });
+      files.push({ path: WORKFLOW_PATH, contentUtf8: buildWorkflowYaml(triggers) });
     }
+    if (needsAction) {
+      files.push(...(await readVendoredAction()));
+    }
+    await commitFiles(token, owner, repo, branch, files, "Update Automated Quality Gate");
 
     const warnings: string[] = [];
     for (const [name, value] of [
@@ -165,7 +163,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   }
 }
 
-// DELETE — remove both files from the repo.
+// DELETE — remove every file the console manages, in one commit.
 export async function DELETE(_req: NextRequest, ctx: Ctx) {
   const g = await guard(ctx);
   if ("error" in g) return g.error;
@@ -173,16 +171,14 @@ export async function DELETE(_req: NextRequest, ctx: Ctx) {
   const branch = record.defaultBranch;
 
   try {
-    for (const p of [WORKFLOW_PATH, CONFIG_PATH]) {
-      const meta = await getContentMeta(token, owner, repo, p, branch);
-      if (meta) {
-        await deleteFile(token, owner, repo, p, {
-          message: `Remove Quality Gate ${p === WORKFLOW_PATH ? "workflow" : "config"}`,
-          sha: meta.sha,
-          branch,
-        });
-      }
-    }
+    const present: string[] = [];
+    await Promise.all(
+      MANAGED_PATHS.map(async (p) => {
+        const meta = await getContentMeta(token, owner, repo, p, branch).catch(() => null);
+        if (meta) present.push(p);
+      }),
+    );
+    await deleteFiles(token, owner, repo, branch, present, "Remove Automated Quality Gate");
     return NextResponse.json({ ok: true });
   } catch (e) {
     if (e instanceof GitHubError) {

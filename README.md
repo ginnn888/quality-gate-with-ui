@@ -59,12 +59,13 @@ secrets on the target repo — they never touch the console's environment.
   key (libsodium sealed box, via `tweetnacl-sealedbox-js`) and uploads them as
   `GEMINI_API_KEY` / `SONAR_TOKEN`. The console keeps no copy.
 
-Installing commits two files to the default branch:
+Installing makes **one commit** to the default branch with:
 
-| File | Purpose |
+| Path | Purpose |
 | --- | --- |
 | `.github/workflows/quality-gate.yml` | Runs on the configured `push` / `pull_request` events. |
 | `config_cov.json` | `{ "global": 80, "files": { "src/x.js": 50 } }` — the coverage targets. |
+| `.quality-gate/` | The gate itself — `action.yml` + the ncc-bundled `dist/index.js`, vendored from `vendor/quality-gate-action/` in this repo. The workflow runs it with `uses: ./.quality-gate`, so there is no published action to depend on. |
 
 ### There is no local database
 
@@ -74,22 +75,30 @@ the user's most-recently-pushed repositories for that file, and every
 installation view is read live from the repo's own contents. Nothing to
 provision, nothing to persist.
 
-### ⚠️ The action reference is not wired up yet
+### The vendored action
 
-The generated workflow checks out the code, installs dependencies, runs the
-optional SonarCloud scan, and then reaches a **placeholder step** where the
-published Automated Quality Gate action should be called. Until that reference is
-filled in (`src/lib/workflowTemplate.ts`, search for `SKIP`), the workflow runs
-green but does not execute the gate. Replace the last step with:
+`vendor/quality-gate-action/` holds `action.yml` and `dist/index.js` — the
+Automated Quality Gate compiled to a single dependency-free bundle (ncc). The
+console commits these into every installed repo under `.quality-gate/` and the
+generated workflow calls them locally:
 
 ```yaml
       - name: Automated Quality Gate
-        uses: <owner>/<repo>@<ref>
+        uses: ./.quality-gate
         with:
           gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
           sonar_token: ${{ secrets.SONAR_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
 ```
+
+To ship a new version of the gate, drop the rebuilt files into
+`vendor/quality-gate-action/` and redeploy; the detail page's **Save changes** /
+drift-repair re-commits them into a repo. `next.config.mjs` traces `vendor/**`
+into the install API routes so `fs` can read them at runtime.
+
+The **Gemini API key**: entered per-repo in the wizard, or left blank to fall
+back to the console's own `GEMINI_API_KEY` env var. Either way it is written as
+the target repo's `GEMINI_API_KEY` Actions secret.
 
 ## Reading results
 

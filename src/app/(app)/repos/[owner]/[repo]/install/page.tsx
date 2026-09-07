@@ -52,7 +52,7 @@ export default function InstallPage() {
   }, [owner, repo]);
 
   async function install() {
-    if (triggers.branches.length === 0 || !geminiKey.trim()) return;
+    if (triggers.branches.length === 0) return;
     setSubmitting(true);
     setError(null);
     setScopeError(false);
@@ -81,7 +81,7 @@ export default function InstallPage() {
     }
   }
 
-  const ready = triggers.branches.length > 0 && !!geminiKey.trim();
+  const ready = triggers.branches.length > 0;
 
   return (
     <div className="space-y-6">
@@ -129,21 +129,19 @@ export default function InstallPage() {
             </p>
 
             <label className="block">
-              <span className="text-xs text-gate-muted">
-                Google Gemini API key <span className="text-gate-fail">*</span>
-              </span>
+              <span className="text-xs text-gate-muted">Google Gemini API key</span>
               <input
                 type="password"
                 autoComplete="off"
                 value={geminiKey}
                 disabled={submitting}
                 onChange={(e) => setGeminiKey(e.target.value)}
-                placeholder="AIza…"
+                placeholder="leave blank to use the console's key"
                 className="mt-1 w-full rounded-lg border border-gate-border bg-gate-panel px-3 py-2 text-sm text-gate-text outline-none focus:border-gate-accent"
               />
               <span className="mt-1 block text-[11px] text-gate-muted">
-                Saved as the <span className="font-mono">GEMINI_API_KEY</span> secret. The gate
-                cannot run without it.
+                Saved as the <span className="font-mono">GEMINI_API_KEY</span> secret. If left
+                blank, the console&apos;s own key is used. The gate cannot run without one.
               </span>
             </label>
 
@@ -166,10 +164,11 @@ export default function InstallPage() {
           </div>
 
           <div className="rounded-xl border border-gate-border bg-gate-accentSoft/40 p-4 text-xs text-gate-muted">
-            Installing commits two files to <code className="text-gate-text">{defaultBranch}</code>:
+            Installing makes one commit to <code className="text-gate-text">{defaultBranch}</code> with:
             <ul className="mt-1.5 list-disc pl-5 font-mono">
               <li>.github/workflows/quality-gate.yml</li>
               <li>config_cov.json</li>
+              <li>.quality-gate/ &nbsp;— the gate action itself (runs via <span>uses: ./.quality-gate</span>)</li>
             </ul>
             <p className="mt-2">
               To block merges on a red gate, add a branch-protection rule requiring the
