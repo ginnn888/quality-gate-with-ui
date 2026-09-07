@@ -1,17 +1,14 @@
-import type { GateConfig, GateEvent } from "./types";
+import type { CoverageConfig, GateEvent, WorkflowTriggers } from "./types";
 
-// Builds the two files the console commits to a repo when the gate is
-// installed: the GitHub Actions workflow and the thresholds file it reads.
+// The two files the console commits to a repository when the gate is installed:
+//   .github/workflows/quality-gate.yml  — the GitHub Actions workflow
+//   config_cov.json                     — the coverage thresholds the action reads
 
-/** `owner/repo/path@ref` of the reusable composite action. Overridable for forks. */
-export const ACTION_REF =
-  process.env.QG_ACTION_REF || "ginnn888/quality-gate-with-ui/action@main";
+export const WORKFLOW_PATH = ".github/workflows/quality-gate.yml";
+export const CONFIG_PATH = "config_cov.json";
 
-export const DEFAULT_GATE_CONFIG: GateConfig = {
-  globalCoverage: 80,
-  perFileCoverage: {},
-  enableSonar: true,
-  enableAiReview: true,
+export const DEFAULT_COVERAGE: CoverageConfig = { global: 80, files: {} };
+export const DEFAULT_TRIGGERS: WorkflowTriggers = {
   branches: ["main"],
   events: ["push", "pull_request"],
 };
@@ -21,17 +18,29 @@ const clampInt = (n: unknown, lo: number, hi: number, fallback: number) => {
   return Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : fallback;
 };
 
-/** Coerce arbitrary JSON into a valid GateConfig. */
-export function normalizeGateConfig(input: unknown): GateConfig {
-  const raw = (input && typeof input === "object" ? input : {}) as Partial<GateConfig>;
+/** Coerce arbitrary JSON (e.g. an existing config_cov.json) into a CoverageConfig. */
+export function normalizeCoverageConfig(input: unknown): CoverageConfig {
+  const raw = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
 
-  const perFileCoverage: Record<string, number> = {};
-  if (raw.perFileCoverage && typeof raw.perFileCoverage === "object") {
-    for (const [k, v] of Object.entries(raw.perFileCoverage as Record<string, unknown>)) {
+  const files: Record<string, number> = {};
+  const rawFiles = raw.files;
+  if (rawFiles && typeof rawFiles === "object") {
+    for (const [k, v] of Object.entries(rawFiles as Record<string, unknown>)) {
+      const path = String(k).trim();
       const n = Number(v);
-      if (Number.isFinite(n)) perFileCoverage[k] = clampInt(n, 0, 100, 80);
+      if (path && Number.isFinite(n)) files[path] = clampInt(n, 0, 100, DEFAULT_COVERAGE.global);
     }
   }
+
+  return {
+    global: clampInt(raw.global, 0, 100, DEFAULT_COVERAGE.global),
+    files,
+  };
+}
+
+/** Coerce arbitrary JSON into a valid WorkflowTriggers. */
+export function normalizeTriggers(input: unknown): WorkflowTriggers {
+  const raw = (input && typeof input === "object" ? input : {}) as Partial<WorkflowTriggers>;
 
   const events = Array.isArray(raw.events)
     ? (raw.events.filter((e) => e === "push" || e === "pull_request") as GateEvent[])
@@ -48,41 +57,24 @@ export function normalizeGateConfig(input: unknown): GateConfig {
     : [];
 
   return {
-    globalCoverage: clampInt(raw.globalCoverage, 0, 100, DEFAULT_GATE_CONFIG.globalCoverage),
-    perFileCoverage,
-    enableSonar: raw.enableSonar ?? DEFAULT_GATE_CONFIG.enableSonar,
-    enableAiReview: raw.enableAiReview ?? DEFAULT_GATE_CONFIG.enableAiReview,
-    branches: branches.length ? branches : [...DEFAULT_GATE_CONFIG.branches],
-    events: events.length ? events : [...DEFAULT_GATE_CONFIG.events],
+    branches: branches.length ? branches : [...DEFAULT_TRIGGERS.branches],
+    events: events.length ? events : [...DEFAULT_TRIGGERS.events],
   };
 }
 
-/** Pretty-printed `quality-gate.config.json`. */
-export function buildConfigJson(cfg: GateConfig): string {
-  return (
-    JSON.stringify(
-      {
-        globalCoverage: cfg.globalCoverage,
-        perFileCoverage: cfg.perFileCoverage,
-        enableSonar: cfg.enableSonar,
-        enableAiReview: cfg.enableAiReview,
-        branches: cfg.branches,
-        events: cfg.events,
-      },
-      null,
-      2,
-    ) + "\n"
-  );
+/** Pretty-printed `config_cov.json`. */
+export function buildCoverageConfigJson(cfg: CoverageConfig): string {
+  return JSON.stringify({ global: cfg.global, files: cfg.files }, null, 2) + "\n";
 }
 
 const yamlList = (items: string[]) => `[${items.map((b) => JSON.stringify(b)).join(", ")}]`;
 
 /** The `.github/workflows/quality-gate.yml` committed to the target repo. */
-export function buildWorkflowYaml(cfg: GateConfig): string {
-  const events = cfg.events.length ? cfg.events : DEFAULT_GATE_CONFIG.events;
-  const branches = cfg.branches.length ? cfg.branches : DEFAULT_GATE_CONFIG.branches;
+export function buildWorkflowYaml(triggers: WorkflowTriggers): string {
+  const events = triggers.events.length ? triggers.events : DEFAULT_TRIGGERS.events;
+  const branches = triggers.branches.length ? triggers.branches : DEFAULT_TRIGGERS.branches;
 
-  const triggers = events
+  const on = events
     .map((e: GateEvent) => `  ${e}:\n    branches: ${yamlList(branches)}`)
     .join("\n");
 
@@ -90,23 +82,60 @@ export function buildWorkflowYaml(cfg: GateConfig): string {
 name: Quality Gate
 
 on:
-${triggers}
+${on}
 
 permissions:
   contents: read
   pull-requests: write
+  statuses: write
+  checks: write
 
 jobs:
   quality-gate:
     runs-on: ubuntu-latest
+    env:
+      SONAR_TOKEN: \${{ secrets.SONAR_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: ${ACTION_REF}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          config-path: quality-gate.config.json
-          gemini-api-key: \${{ secrets.GEMINI_API_KEY }}
-          github-token: \${{ secrets.GITHUB_TOKEN }}
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      # SonarCloud runs only when a SONAR_TOKEN repo secret is set.
+      - name: SonarCloud Scan
+        if: env.SONAR_TOKEN != ''
+        uses: sonarsource/sonarqube-scan-action@v6
+        env:
+          GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: \${{ secrets.SONAR_TOKEN }}
+
+      # ────────────────────────────────────────────────────────────────────
+      # SKIP — Automated Quality Gate action reference not wired up yet.
+      # When the published action is ready, replace the step below with:
+      #
+      #   - name: Automated Quality Gate
+      #     uses: <owner>/<repo>@<ref>
+      #     with:
+      #       gemini_api_key: \${{ secrets.GEMINI_API_KEY }}
+      #       sonar_token: \${{ secrets.SONAR_TOKEN }}
+      #       github_token: \${{ secrets.GITHUB_TOKEN }}
+      # ────────────────────────────────────────────────────────────────────
+      - name: Automated Quality Gate (not configured)
+        run: |
+          echo "Quality Gate workflow is installed, but the action reference is not set yet."
+          echo "Edit ${WORKFLOW_PATH} to point the last step at the published action."
 `;
 }

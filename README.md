@@ -1,35 +1,29 @@
 # Quality Gate Console
 
-A web UI for the **Automated Quality Gate** (`../Automated-Quality-Gate (1)`). Two ways to use
-it, both after **signing in with GitHub**:
+A web UI for the **Automated Quality Gate** GitHub Action. The console never runs
+any analysis itself — it is purely the front door:
 
-- **Run gate** (`/`) — a one-off run: pick a repo + files (or upload files), read the report in
-  the browser, share it via its `/runs/<id>` permalink.
-- **Install** (`/repos` → `/installed`) — commit a small GitHub Actions workflow into a repo so
-  the gate runs automatically on every `push` / `pull_request`. Set the pass/fail thresholds at
-  install time, change them or uninstall whenever. See
-  [Install the gate onto a repository](#install-the-gate-onto-a-repository).
+1. **Sign in with GitHub.**
+2. **Install** the gate onto a repository — the console commits a workflow file
+   and a `config_cov.json`, and sets the repo secrets the action needs.
+3. **Tune** the coverage thresholds from the web; saving re-commits
+   `config_cov.json` to the repo.
+4. From then on **GitHub Actions runs the gate** on every push / pull request.
+   The verdict is posted to the pull request.
+5. The console **reads those results back** from GitHub and shows them per PR.
 
 Built with **Next.js 15 (App Router) · React 19 · TypeScript · Tailwind CSS · Auth.js v5**.
 
 ## Sign in with GitHub
 
-GitHub OAuth is the **only** way into the console — there is no anonymous mode and no
-password login. `src/middleware.ts` gates every page and API route: an unauthenticated
-browser request is redirected to `/signin`, an unauthenticated API request gets a 401.
+GitHub OAuth is the **only** way in — no anonymous mode, no password login.
+`src/middleware.ts` gates every page and API route. Once signed in, the OAuth
+token rides on the session JWT and **every GitHub call is made as that user**, so
+the console can only ever see and change what that account already can.
 
-Once signed in, the account is connected to the console:
-
-- the OAuth token is kept on the session JWT and **every GitHub call is made as that user**,
-  so the console can only ever see repositories that account can see;
-- runs are stamped with the GitHub login that produced them, and the history list and
-  `/runs/<id>` permalink only return your own runs.
-
-The requested scope is `read:user user:email repo workflow`. `repo` lets the console list and
-read **private** repositories; `workflow` is required on top of it so the console can create or
-update `.github/workflows/quality-gate.yml` when you install the gate. If you upgraded from a
-build that only asked for `repo`, **sign out and back in once** to grant `workflow` — installs
-fail with a "missing the `workflow` scope" message until you do.
+Scope: `read:user user:email repo workflow`. `repo` reads private repositories;
+`workflow` is required to commit `.github/workflows/quality-gate.yml`. Upgrading
+from a `repo`-only build? **Sign out and back in once** to grant `workflow`.
 
 ### Create the OAuth app
 
@@ -37,10 +31,8 @@ fail with a "missing the `workflow` scope" message until you do.
 
 | Field | Value |
 | --- | --- |
-| Homepage URL | `http://localhost:3000` |
-| Authorization callback URL | `http://localhost:3000/api/auth/callback/github` |
-
-Then put the credentials in `.env.local`:
+| Homepage URL | `http://localhost:3000` (or your deployed URL) |
+| Authorization callback URL | `<url>/api/auth/callback/github` |
 
 ```
 GITHUB_ID=...
@@ -49,88 +41,71 @@ NEXTAUTH_URL=http://localhost:3000
 NEXTAUTH_SECRET=...          # openssl rand -base64 32
 ```
 
-## Picking what to check
-
-1. **Choose a repository** — the picker lists the repositories the signed-in account pushed
-   to most recently; typing searches GitHub (scoped to the account, so private repos are
-   included).
-2. **Choose the files** — the console reads the repository tree for the selected branch and
-   lists the analysable sources, already filtered: `.js .jsx .ts .tsx .mjs .cjs`, minus
-   `node_modules`, build output, and existing test files (the gate writes its own tests).
-   Up to 25 files, 512 KB each.
-3. **Run the gate** — the selected files are fetched with your token and handed to the
-   pipeline below, which is **unchanged**: it receives `{name, content}` exactly as it did
-   for uploads. Nothing about the analysis differs based on where the code came from.
-
-The **Upload files** tab keeps the original drag-and-drop path for code that isn't in a repo.
+That is the **entire** server configuration. The Gemini key and SonarCloud token
+are entered per-repo in the install wizard and stored as encrypted GitHub Actions
+secrets on the target repo — they never touch the console's environment.
 
 ## Install the gate onto a repository
 
-`/repos` lists every repo the account can reach. **Install** on one opens a wizard: set the
-coverage target, toggles, watched branches and trigger events, then confirm. The console then
-commits two files to the repo's default branch via the GitHub Contents API:
+`/repos` lists every repo the account can reach. **Install** opens a wizard:
+
+- **Coverage thresholds** — a global target plus optional per-file overrides.
+  Written to `config_cov.json`, which the action reads (`qgConfig.global`,
+  `qgConfig.files[path]`).
+- **Triggers** — which branches and events (`push` / `pull_request`) the
+  workflow reacts to. Baked into the `on:` block of the workflow YAML.
+- **Repository secrets** — the **Gemini API key** (required) and an optional
+  **SonarCloud token**. The console encrypts them with the repo's Actions public
+  key (libsodium sealed box, via `tweetnacl-sealedbox-js`) and uploads them as
+  `GEMINI_API_KEY` / `SONAR_TOKEN`. The console keeps no copy.
+
+Installing commits two files to the default branch:
 
 | File | Purpose |
 | --- | --- |
-| `.github/workflows/quality-gate.yml` | Runs on the configured `push` / `pull_request` events. Calls the reusable action `ginnn888/quality-gate-with-ui/action@main` (see [`action/`](action/README.md)). |
-| `quality-gate.config.json` | The thresholds the action reads. |
+| `.github/workflows/quality-gate.yml` | Runs on the configured `push` / `pull_request` events. |
+| `config_cov.json` | `{ "global": 80, "files": { "src/x.js": 50 } }` — the coverage targets. |
 
-- **`/installed`** — a card per installed repo (watched branches, coverage target, latest
-  workflow-run result pulled live from the GitHub Actions API).
-- **`/installed/<owner>/<repo>`** — recent runs, an edit form that re-commits
-  `quality-gate.config.json` (and the workflow when triggers change), a drift banner if either
-  file goes missing, and **Uninstall** (deletes both files, then forgets the installation).
+### There is no local database
 
-Installation records live under `.data/installations/<owner>__<repo>.json`, scoped to the
-GitHub login that installed them — same store pattern as runs.
+"Installed" is not a stored row — it is a fact about the repo: it has
+`.github/workflows/quality-gate.yml`. The dashboard derives its list by scanning
+the user's most-recently-pushed repositories for that file, and every
+installation view is read live from the repo's own contents. Nothing to
+provision, nothing to persist.
 
-### What runs in CI
+### ⚠️ The action reference is not wired up yet
 
-The action runs the **simulation** engine (dependency-free static analysis + `npm audit`,
-no secrets) by default. Add a **`GEMINI_API_KEY`** *repo secret* to the target repo to switch
-it to the **live** engine (real Gemini review + coverage estimate per changed file); any live
-failure falls back to simulation. The job writes the Markdown report to the run's **job
-summary** and exits non-zero on a failing gate.
+The generated workflow checks out the code, installs dependencies, runs the
+optional SonarCloud scan, and then reaches a **placeholder step** where the
+published Automated Quality Gate action should be called. Until that reference is
+filled in (`src/lib/workflowTemplate.ts`, search for `SKIP`), the workflow runs
+green but does not execute the gate. Replace the last step with:
 
-### Blocking merges
+```yaml
+      - name: Automated Quality Gate
+        uses: <owner>/<repo>@<ref>
+        with:
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          sonar_token: ${{ secrets.SONAR_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+```
 
-The action only reports a check. To actually block a merge on a red gate, add a
-**branch-protection rule** on GitHub requiring the **Quality Gate** status check — that part is
-a repo setting, not something the console configures.
+## Reading results
 
-## Two engines
+`/installed/<owner>/<repo>` shows, per open pull request, the latest gate run's
+status and — expandable inline — the full **report comment** the action posted to
+that PR (matched by its `AI-Powered Quality Gate Report` heading). It also lists
+recent workflow runs and lets you re-tune coverage / triggers / secrets or
+uninstall.
 
-Set `QG_ENGINE` in `.env.local`.
-
-### `live` — runs the REAL Automated Quality Gate
-
-`src/lib/engine/liveRunner.ts` creates a throwaway git workspace inside the action directory,
-drops the selected files into `src/`, and runs the **actual `generate-tests.js`** from
-`../Automated-Quality-Gate (1)/Automated-Quality-Gate` (resolving that project's own
-`node_modules` for Jest + `@google/generative-ai`). The only change made to the script is two
-extra `writeFileSync` calls so the web app can read back its `summary` object and Markdown.
-
-| Stage | What actually happens |
-| --- | --- |
-| detect modified files | real `git diff main…HEAD -- src/` in the workspace |
-| dependency audit | real `npm audit --json` |
-| AI review + classification | **real Google Gemini call** per file (`QG_GEMINI_MODEL`) |
-| test-gen + coverage gate | **real Gemini** writes Jest suites → **real `npx jest --coverage`** → real per-file % vs `config_cov.json` (generated from the UI's coverage settings) |
-| AI failure analysis | real Gemini call when a generated suite fails |
-| SonarCloud | fetches the project's current gate via the REST API. The console does **not** run a `sonar-scanner` upload, so when the API returns no analysis the check shows **UNAVAILABLE** and does not affect the result. |
-
-A live run takes ~25–40 s (several Gemini calls + a Jest run). Requires `GEMINI_API_KEY`.
-
-### `simulation` — default, zero-config
-
-`npm audit` is still real; everything else is dependency-free static analysis over the
-selected source (flags `eval`, shell `exec`, hardcoded secrets, weak randomness, missing
-input validation, `-0` leaks, loose equality), with coverage estimated from that analysis.
+To actually **block merges** on a red gate, add a branch-protection rule on
+GitHub requiring the **Quality Gate** status check — that is a repo setting, not
+something the console configures.
 
 ## Run it
 
 ```bash
-cd "quality-gate-ui"
 npm install
 cp .env.example .env.local   # fill in GITHUB_ID / GITHUB_SECRET / NEXTAUTH_SECRET
 npm run dev                  # http://localhost:3000
@@ -139,50 +114,31 @@ npm run dev                  # http://localhost:3000
 ## Layout
 
 ```
-action/                      reusable composite GitHub Action (see action/README.md)
-  action.yml                 setup-node → node runner.mjs
-  runner.mjs                 diff range → read changed files → engine → job summary → exit code
-  lib/                       simulate.mjs · live.mjs · heuristics.mjs · npmAudit.mjs · report.mjs
-
 src/
   middleware.ts              auth gate over every page + API route
   app/
-    signin/page.tsx          "Sign in with GitHub" — the only entry point
-    page.tsx                 manual run: repo/file picker → config → result
-    history/page.tsx         all your manual runs
-    repos/page.tsx           browse repos, install the gate
-    repos/[owner]/[repo]/install/page.tsx   install wizard
-    installed/page.tsx       cards for installed repos
-    installed/[owner]/[repo]/page.tsx       runs + reconfigure + uninstall
-    runs/[id]/page.tsx       permalink for a past run (owner-only)
-    api/auth/[...nextauth]/  Auth.js route handlers
-    api/github/repos/        search + list the user's repositories
-    api/github/files/        branches + analysable source files in a ref
-    api/analyze/             POST repo selection *or* uploaded files -> run -> persist
-    api/runs/[id]/           fetch a stored run (owner-only)
-    api/installations/       GET list · POST install
-    api/installations/[owner]/[repo]/   GET (record+runs+drift) · PATCH reconfigure · DELETE uninstall
-  components/                Sidebar, RepoPicker, GateConfigPanel, InstalledRepoCard, ReportView …
+    signin/page.tsx          "Sign in with GitHub" — the only entry point, no sidebar
+    (app)/
+      layout.tsx             sidebar + auth redirect for everything below
+      page.tsx               dashboard: repos with the gate installed
+      repos/page.tsx         browse repos, install the gate
+      repos/[owner]/[repo]/install/page.tsx   install wizard (coverage + triggers + secrets)
+      installed/[owner]/[repo]/page.tsx       reconfigure, secrets, per-PR results, uninstall
+    api/
+      auth/[...nextauth]/    Auth.js route handlers
+      github/repos/          search + list the user's repositories
+      github/files/          repo metadata + branch list (for the wizard)
+      installations/         GET (scan) · POST (commit files + set secrets)
+      installations/[owner]/[repo]/   GET (record + runs + PR results) · PATCH · DELETE
   lib/
     auth.ts                  Auth.js config — GitHub provider, token on the JWT
-    github.ts                GitHub REST client (repos, tree, contents R/W, workflow runs)
-    installations.ts         filesystem store for installed repos (.data/installations)
-    workflowTemplate.ts      builds quality-gate.yml + quality-gate.config.json
+    github.ts                GitHub REST client (repos, contents R/W, runs, PRs, comments, secrets)
+    githubSecrets.ts         sealed-box encryption for repo Actions secrets
+    installations.ts         derives the installed view from a repo's own contents
+    workflowTemplate.ts      builds quality-gate.yml + config_cov.json
     apiErrors.ts             maps GitHub write failures (esp. missing `workflow` scope)
-    engine/index.ts          orchestrator for the manual flow (simulation vs live)
-    engine/liveRunner.ts     spawns the real generate-tests.js in a git workspace
-    engine/heuristics.ts     static analysis for the simulation engine
-    engine/npmAudit.ts       real `npm audit`
-    report.ts                port of generateMarkdownReport() from the Action
-    store.ts                 filesystem run persistence (.data/runs), scoped by login
-    types.ts                 Report + GateConfig + InstallationRecord shapes
+    types.ts                 CoverageConfig / WorkflowTriggers / InstalledRepo / GatePrResult
+
+action/                      a from-scratch re-implementation of the gate — NOT used by
+                             the console anymore; kept for reference only
 ```
-
-Runs are stored as JSON under `.data/runs/`; installations under `.data/installations/` (both
-git-ignored). Live workspaces are created under `Automated-Quality-Gate/.qg-runs/<id>/` and
-deleted after each successful run.
-
-> **Note:** `action/lib/{heuristics,npmAudit,report}.mjs` are hand-kept plain-ESM copies of
-> `src/lib/engine/{heuristics,npmAudit}.ts` + `src/lib/report.ts` — they run in a consumer
-> repo's checkout where the TS sources aren't present. Change the rules in one, mirror them in
-> the other.

@@ -1,7 +1,8 @@
 // Thin GitHub REST client. Every call is made with the signed-in user's OAuth
-// token, so the console can only ever see what that GitHub account can see.
+// token, so the console can only ever see and change what that GitHub account
+// can. There is no server-side GitHub token anywhere.
 
-import type { WorkflowRunRow } from "./types";
+import type { PullRequestRow, WorkflowRunRow } from "./types";
 
 const API = "https://api.github.com";
 
@@ -17,41 +18,60 @@ export interface GitHubRepo {
   stars: number;
   updatedAt: string;
   htmlUrl: string;
-}
-
-export interface RepoFileEntry {
-  path: string;
-  size: number;
+  permissions: { push: boolean; admin: boolean };
 }
 
 export class GitHubError extends Error {
-  constructor(message: string, readonly status: number) {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
     super(message);
   }
 }
 
+const BASE_HEADERS = (token: string) => ({
+  Authorization: `Bearer ${token}`,
+  Accept: "application/vnd.github+json",
+  "X-GitHub-Api-Version": "2022-11-28",
+  "User-Agent": "quality-gate-console",
+});
+
+async function parseError(res: Response): Promise<never> {
+  const body = await res.text().catch(() => "");
+  let msg = `GitHub API ${res.status}`;
+  try {
+    const parsed = JSON.parse(body);
+    if (parsed?.message) msg = parsed.message;
+  } catch {
+    /* keep the generic message */
+  }
+  throw new GitHubError(msg, res.status);
+}
+
 async function gh<T>(token: string, url: string): Promise<T> {
   const res = await fetch(url.startsWith("http") ? url : `${API}${url}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-      "User-Agent": "quality-gate-console",
-    },
+    headers: BASE_HEADERS(token),
     cache: "no-store",
   });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    let msg = `GitHub API ${res.status}`;
-    try {
-      const parsed = JSON.parse(body);
-      if (parsed?.message) msg = parsed.message;
-    } catch {
-      /* keep the generic message */
-    }
-    throw new GitHubError(msg, res.status);
-  }
+  if (!res.ok) await parseError(res);
   return (await res.json()) as T;
+}
+
+async function ghSend<T>(
+  token: string,
+  method: "PUT" | "DELETE" | "POST" | "PATCH",
+  url: string,
+  body: unknown,
+): Promise<T> {
+  const res = await fetch(url.startsWith("http") ? url : `${API}${url}`, {
+    method,
+    headers: { ...BASE_HEADERS(token), "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    cache: "no-store",
+  });
+  if (!res.ok) await parseError(res);
+  return (await res.json().catch(() => ({}))) as T;
 }
 
 function mapRepo(r: any): GitHubRepo {
@@ -67,8 +87,16 @@ function mapRepo(r: any): GitHubRepo {
     stars: r.stargazers_count ?? 0,
     updatedAt: r.pushed_at || r.updated_at || "",
     htmlUrl: r.html_url ?? "",
+    permissions: {
+      push: !!r.permissions?.push,
+      admin: !!r.permissions?.admin,
+    },
   };
 }
+
+const encodePath = (p: string) => p.split("/").map(encodeURIComponent).join("/");
+
+// ── repositories ───────────────────────────────────────────────────────────
 
 /** The user's own repositories (incl. private + org repos they can push to). */
 export async function listUserRepos(token: string, perPage = 100): Promise<GitHubRepo[]> {
@@ -107,77 +135,7 @@ export async function listBranches(token: string, owner: string, repo: string): 
   return data.map((b) => b.name);
 }
 
-const SOURCE_EXT = /\.(js|jsx|ts|tsx|mjs|cjs)$/i;
-const IGNORED_DIR =
-  /(^|\/)(node_modules|dist|build|out|coverage|\.next|\.git|vendor|__snapshots__|\.yarn)(\/|$)/i;
-const TEST_FILE = /(\.(test|spec)\.[jt]sx?$)|((^|\/)(__tests__|tests?)\/)/i;
-
-/**
- * Every analysable source file in a ref, already filtered down to the file
- * types the quality gate understands. Test files and build output are dropped —
- * the gate generates its own tests.
- */
-export async function listSourceFiles(
-  token: string,
-  owner: string,
-  repo: string,
-  ref: string,
-): Promise<{ files: RepoFileEntry[]; truncated: boolean }> {
-  const tree = await gh<{ tree: any[]; truncated: boolean }>(
-    token,
-    `/repos/${owner}/${repo}/git/trees/${encodeURIComponent(ref)}?recursive=1`,
-  );
-  const files = (tree.tree ?? [])
-    .filter(
-      (n) =>
-        n.type === "blob" &&
-        SOURCE_EXT.test(n.path) &&
-        !IGNORED_DIR.test(n.path) &&
-        !TEST_FILE.test(n.path),
-    )
-    .map((n) => ({ path: n.path as string, size: Number(n.size) || 0 }))
-    .sort((a, b) => a.path.localeCompare(b.path));
-
-  return { files, truncated: !!tree.truncated };
-}
-
-// --- write helpers (used by the "install the gate onto a repo" flow) --------
-
-const WRITE_HEADERS = (token: string) => ({
-  Authorization: `Bearer ${token}`,
-  Accept: "application/vnd.github+json",
-  "X-GitHub-Api-Version": "2022-11-28",
-  "User-Agent": "quality-gate-console",
-  "Content-Type": "application/json",
-});
-
-async function ghSend<T>(
-  token: string,
-  method: "PUT" | "DELETE" | "POST" | "PATCH",
-  url: string,
-  body: unknown,
-): Promise<T> {
-  const res = await fetch(url.startsWith("http") ? url : `${API}${url}`, {
-    method,
-    headers: WRITE_HEADERS(token),
-    body: body === undefined ? undefined : JSON.stringify(body),
-    cache: "no-store",
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    let msg = `GitHub API ${res.status}`;
-    try {
-      const parsed = JSON.parse(text);
-      if (parsed?.message) msg = parsed.message;
-    } catch {
-      /* keep generic */
-    }
-    throw new GitHubError(msg, res.status);
-  }
-  return (await res.json().catch(() => ({}))) as T;
-}
-
-const encodePath = (p: string) => p.split("/").map(encodeURIComponent).join("/");
+// ── file contents ──────────────────────────────────────────────────────────
 
 /** Metadata for a file already in the repo, or null when it does not exist. */
 export async function getContentMeta(
@@ -197,6 +155,36 @@ export async function getContentMeta(
   } catch (e) {
     if (e instanceof GitHubError && e.status === 404) return null;
     throw e;
+  }
+}
+
+/** Decoded UTF-8 text of a file, or null when it does not exist. */
+export async function getFileText(
+  token: string,
+  owner: string,
+  repo: string,
+  filePath: string,
+  ref?: string,
+): Promise<string | null> {
+  const meta = await getContentMeta(token, owner, repo, filePath, ref);
+  if (!meta) return null;
+  return Buffer.from(meta.contentBase64, "base64").toString("utf8");
+}
+
+/** Parsed JSON of a file, or null when it is missing / unparseable. */
+export async function getJsonFile<T = unknown>(
+  token: string,
+  owner: string,
+  repo: string,
+  filePath: string,
+  ref?: string,
+): Promise<T | null> {
+  const text = await getFileText(token, owner, repo, filePath, ref);
+  if (text == null) return null;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
   }
 }
 
@@ -231,13 +219,29 @@ export async function deleteFile(
   });
 }
 
+// ── Actions: workflow runs ─────────────────────────────────────────────────
+
+function mapRun(r: any): WorkflowRunRow {
+  return {
+    id: r.id,
+    runNumber: r.run_number,
+    status: r.status ?? "unknown",
+    conclusion: r.conclusion ?? null,
+    event: r.event ?? "",
+    headBranch: r.head_branch ?? null,
+    headSha: r.head_sha ?? "",
+    htmlUrl: r.html_url ?? "",
+    createdAt: r.created_at ?? "",
+  };
+}
+
 /** Recent runs of one workflow file (e.g. `quality-gate.yml`). */
 export async function listWorkflowRuns(
   token: string,
   owner: string,
   repo: string,
   workflowFile: string,
-  perPage = 20,
+  perPage = 30,
 ): Promise<WorkflowRunRow[]> {
   const data = await gh<{ workflow_runs?: any[] }>(
     token,
@@ -245,34 +249,127 @@ export async function listWorkflowRuns(
       workflowFile,
     )}/runs?per_page=${perPage}`,
   );
-  return (data.workflow_runs ?? []).map((r) => ({
-    id: r.id,
-    runNumber: r.run_number,
-    status: r.status ?? "unknown",
-    conclusion: r.conclusion ?? null,
-    event: r.event ?? "",
-    headBranch: r.head_branch ?? null,
-    headSha: (r.head_sha ?? "").slice(0, 7),
-    htmlUrl: r.html_url ?? "",
-    createdAt: r.created_at ?? "",
-  }));
+  return (data.workflow_runs ?? []).map(mapRun).map((r) => ({ ...r, headSha: r.headSha.slice(0, 40) }));
 }
 
-/** Raw content of one file at a ref. */
-export async function getFileContent(
+// ── Actions: secrets (encrypted writes) ────────────────────────────────────
+
+/** The repo's Actions public key — needed to encrypt a secret value before upload. */
+export async function getActionsPublicKey(
   token: string,
   owner: string,
   repo: string,
-  ref: string,
-  filePath: string,
-): Promise<string> {
-  const data = await gh<{ content?: string; encoding?: string; size: number }>(
+): Promise<{ keyId: string; key: string }> {
+  const data = await gh<{ key_id: string; key: string }>(
     token,
-    `/repos/${owner}/${repo}/contents/${filePath
-      .split("/")
-      .map(encodeURIComponent)
-      .join("/")}?ref=${encodeURIComponent(ref)}`,
+    `/repos/${owner}/${repo}/actions/secrets/public-key`,
   );
-  if (!data.content) throw new GitHubError(`${filePath} has no readable content`, 422);
-  return Buffer.from(data.content, (data.encoding as BufferEncoding) || "base64").toString("utf8");
+  return { keyId: data.key_id, key: data.key };
+}
+
+/** Create or update one repo Actions secret. `encryptedValue` is a libsodium sealed box, base64. */
+export async function putActionsSecret(
+  token: string,
+  owner: string,
+  repo: string,
+  name: string,
+  encryptedValue: string,
+  keyId: string,
+): Promise<void> {
+  await ghSend(token, "PUT", `/repos/${owner}/${repo}/actions/secrets/${encodeURIComponent(name)}`, {
+    encrypted_value: encryptedValue,
+    key_id: keyId,
+  });
+}
+
+/**
+ * Names of the repo's Actions secrets. Requires admin on the repo — returns
+ * `null` when the token cannot read them so callers can degrade gracefully.
+ */
+export async function listActionsSecretNames(
+  token: string,
+  owner: string,
+  repo: string,
+): Promise<string[] | null> {
+  try {
+    const data = await gh<{ secrets?: { name: string }[] }>(
+      token,
+      `/repos/${owner}/${repo}/actions/secrets?per_page=100`,
+    );
+    return (data.secrets ?? []).map((s) => s.name);
+  } catch (e) {
+    if (e instanceof GitHubError && (e.status === 403 || e.status === 404)) return null;
+    throw e;
+  }
+}
+
+// ── pull requests + comments ──────────────────────────────────────────────
+
+export async function listOpenPullRequests(
+  token: string,
+  owner: string,
+  repo: string,
+  perPage = 20,
+): Promise<PullRequestRow[]> {
+  const data = await gh<any[]>(
+    token,
+    `/repos/${owner}/${repo}/pulls?state=open&sort=updated&direction=desc&per_page=${perPage}`,
+  );
+  return data.map((p) => ({
+    number: p.number,
+    title: p.title ?? "",
+    htmlUrl: p.html_url ?? "",
+    headBranch: p.head?.ref ?? "",
+    headSha: p.head?.sha ?? "",
+    author: p.user?.login ?? "",
+    updatedAt: p.updated_at ?? "",
+  }));
+}
+
+export interface IssueComment {
+  id: number;
+  body: string;
+  user: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function listIssueComments(
+  token: string,
+  owner: string,
+  repo: string,
+  issueNumber: number,
+  perPage = 100,
+): Promise<IssueComment[]> {
+  const data = await gh<any[]>(
+    token,
+    `/repos/${owner}/${repo}/issues/${issueNumber}/comments?per_page=${perPage}`,
+  );
+  return data.map((c) => ({
+    id: c.id,
+    body: c.body ?? "",
+    user: c.user?.login ?? "",
+    createdAt: c.created_at ?? "",
+    updatedAt: c.updated_at ?? "",
+  }));
+}
+
+// ── small concurrency helper ──────────────────────────────────────────────
+
+/** Run `fn` over `items` with at most `limit` in flight. Order is preserved. */
+export async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < items.length) {
+      const i = cursor++;
+      out[i] = await fn(items[i], i);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
 }

@@ -7,10 +7,11 @@
 }
 
 body {
-  background: #f8f7fd;
+  background: #f6f5fd;
   background-image:
-    radial-gradient(560px circle at 8% -10%, rgba(124, 111, 239, 0.10), transparent 60%),
-    radial-gradient(520px circle at 100% 0%, rgba(79, 140, 247, 0.10), transparent 55%);
+    radial-gradient(680px circle at 4% -12%, rgba(124, 111, 239, 0.16), transparent 60%),
+    radial-gradient(620px circle at 102% -4%, rgba(79, 140, 247, 0.15), transparent 55%),
+    radial-gradient(720px circle at 88% 108%, rgba(142, 216, 196, 0.14), transparent 60%);
   background-attachment: fixed;
   color: #211f35;
 }

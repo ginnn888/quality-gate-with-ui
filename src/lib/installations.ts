@@ -1,88 +1,144 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
-import type { InstallationRecord, InstallationSummaryRow } from "./types";
+// "Installed" is not a database row — it is a fact about the repository on
+// GitHub: it has `.github/workflows/quality-gate.yml`. Everything here derives
+// the console's view of an installation from the repo's own contents, read with
+// the signed-in user's token.
 
-// One JSON file per repo the console has installed the quality gate onto,
-// under .data/installations/. Same filesystem-store pattern as ./store.ts:
-// each record carries the GitHub login that installed it, so a user only ever
-// sees their own installations.
-const DATA_DIR = path.join(process.cwd(), ".data", "installations");
+import {
+  type GitHubRepo,
+  getContentMeta,
+  getJsonFile,
+  getFileText,
+  getRepo,
+  listActionsSecretNames,
+  listUserRepos,
+  mapLimit,
+} from "./github";
+import { CONFIG_PATH, WORKFLOW_PATH, normalizeCoverageConfig, normalizeTriggers } from "./workflowTemplate";
+import type {
+  CoverageConfig,
+  InstalledRepo,
+  InstalledRepoSummary,
+  RepoSecretState,
+  WorkflowTriggers,
+} from "./types";
 
-export const WORKFLOW_PATH = ".github/workflows/quality-gate.yml";
-export const CONFIG_PATH = "quality-gate.config.json";
+export { CONFIG_PATH, WORKFLOW_PATH };
 
-async function ensureDir() {
-  await fs.mkdir(DATA_DIR, { recursive: true });
+/** How many of the user's most-recently-pushed repos the dashboard scans. */
+const SCAN_LIMIT = 100;
+const SCAN_CONCURRENCY = 12;
+
+/**
+ * Recover the trigger settings from a workflow file the console generated. The
+ * YAML is machine-written, so a light regex read is enough — and it means the
+ * console does not need a YAML parser.
+ */
+export function parseTriggersFromYaml(yaml: string): WorkflowTriggers {
+  const onBlock = yaml.split(/\npermissions:/)[0];
+  const events: ("push" | "pull_request")[] = [];
+  if (/\n\s{2}push:/.test(onBlock)) events.push("push");
+  if (/\n\s{2}pull_request:/.test(onBlock)) events.push("pull_request");
+
+  const branchMatch = onBlock.match(/branches:\s*\[([^\]]*)\]/);
+  const branches = branchMatch
+    ? branchMatch[1]
+        .split(",")
+        .map((s) => s.trim().replace(/^["']|["']$/g, ""))
+        .filter(Boolean)
+    : [];
+
+  return normalizeTriggers({ events, branches });
 }
 
-/** `owner__repo`, filesystem-safe. Repo names allow `.` `-` `_`, never `__`. */
-function key(owner: string, repo: string): string {
-  return `${owner}__${repo}`.toLowerCase();
+function secretState(names: string[] | null): RepoSecretState {
+  if (names === null) return { geminiApiKey: false, sonarToken: false, readable: false };
+  return {
+    readable: true,
+    geminiApiKey: names.includes("GEMINI_API_KEY"),
+    sonarToken: names.includes("SONAR_TOKEN"),
+  };
 }
 
-function fileFor(owner: string, repo: string): string {
-  return path.join(DATA_DIR, `${key(owner, repo)}.json`);
-}
-
-export async function saveInstallation(rec: InstallationRecord): Promise<void> {
-  await ensureDir();
-  await fs.writeFile(fileFor(rec.owner, rec.name), JSON.stringify(rec, null, 2), "utf8");
-}
-
-export async function getInstallation(
+/** Full installation view for one repo, or null when the workflow file is absent. */
+export async function getInstalledRepo(
+  token: string,
   owner: string,
   repo: string,
-): Promise<InstallationRecord | null> {
-  try {
-    const raw = await fs.readFile(fileFor(owner, repo), "utf8");
-    return JSON.parse(raw) as InstallationRecord;
-  } catch {
-    return null;
-  }
+): Promise<InstalledRepo | null> {
+  const meta = await getRepo(token, owner, repo);
+  return readInstalledRepo(token, meta);
 }
 
-export async function deleteInstallation(owner: string, repo: string): Promise<void> {
-  try {
-    await fs.unlink(fileFor(owner, repo));
-  } catch {
-    /* already gone */
-  }
+async function readInstalledRepo(token: string, meta: GitHubRepo): Promise<InstalledRepo | null> {
+  const branch = meta.defaultBranch;
+
+  const [workflowText, coverageJson, configMeta, secretNames] = await Promise.all([
+    getFileText(token, meta.owner, meta.name, WORKFLOW_PATH, branch),
+    getJsonFile<Partial<CoverageConfig>>(token, meta.owner, meta.name, CONFIG_PATH, branch),
+    getContentMeta(token, meta.owner, meta.name, CONFIG_PATH, branch),
+    listActionsSecretNames(token, meta.owner, meta.name),
+  ]);
+
+  if (workflowText == null) return null;
+
+  return {
+    fullName: meta.fullName,
+    owner: meta.owner,
+    name: meta.name,
+    private: meta.private,
+    htmlUrl: meta.htmlUrl,
+    defaultBranch: branch,
+    coverage: normalizeCoverageConfig(coverageJson ?? {}),
+    triggers: parseTriggersFromYaml(workflowText),
+    hasWorkflow: true,
+    hasConfig: configMeta != null,
+    secrets: secretState(secretNames),
+  };
 }
 
-/** True when `login` installed this gate. Legacy records with no installer are public. */
-export function ownsInstallation(
-  rec: InstallationRecord,
-  login: string | undefined | null,
-): boolean {
-  if (!rec.installedBy?.login) return true;
-  return !!login && rec.installedBy.login.toLowerCase() === login.toLowerCase();
-}
+/** Every repo the signed-in user can reach that has the gate workflow installed. */
+export async function listInstalledRepos(token: string): Promise<InstalledRepoSummary[]> {
+  const repos = (await listUserRepos(token, SCAN_LIMIT)).slice(0, SCAN_LIMIT);
 
-export async function listInstallations(login?: string): Promise<InstallationSummaryRow[]> {
-  await ensureDir();
-  const entries = (await fs.readdir(DATA_DIR)).filter((f) => f.endsWith(".json"));
-  const rows: InstallationSummaryRow[] = [];
-  for (const file of entries) {
-    try {
-      const raw = await fs.readFile(path.join(DATA_DIR, file), "utf8");
-      const rec = JSON.parse(raw) as InstallationRecord;
-      if (login && !ownsInstallation(rec, login)) continue;
-      rows.push({
-        fullName: rec.fullName,
-        owner: rec.owner,
-        name: rec.name,
-        private: rec.private,
-        htmlUrl: rec.htmlUrl,
-        defaultBranch: rec.defaultBranch,
-        branches: rec.config.branches,
-        installedAt: rec.installedAt,
-        updatedAt: rec.updatedAt,
-        globalCoverage: rec.config.globalCoverage,
-      });
-    } catch {
-      /* skip corrupt file */
-    }
-  }
-  rows.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  return rows;
+  const hits = await mapLimit(repos, SCAN_CONCURRENCY, async (r) => {
+    const meta = await getContentMeta(token, r.owner, r.name, WORKFLOW_PATH, r.defaultBranch).catch(
+      () => null,
+    );
+    return meta ? r : null;
+  });
+
+  const installed = hits.filter((r): r is GitHubRepo => r !== null);
+
+  const summaries = await mapLimit(installed, SCAN_CONCURRENCY, async (r) => {
+    const cov = await getJsonFile<Partial<CoverageConfig>>(
+      token,
+      r.owner,
+      r.name,
+      CONFIG_PATH,
+      r.defaultBranch,
+    ).catch(() => null);
+    const workflowText = await getFileText(
+      token,
+      r.owner,
+      r.name,
+      WORKFLOW_PATH,
+      r.defaultBranch,
+    ).catch(() => null);
+
+    const coverage = normalizeCoverageConfig(cov ?? {});
+    const triggers = workflowText ? parseTriggersFromYaml(workflowText) : normalizeTriggers({});
+
+    return {
+      fullName: r.fullName,
+      owner: r.owner,
+      name: r.name,
+      private: r.private,
+      htmlUrl: r.htmlUrl,
+      defaultBranch: r.defaultBranch,
+      globalCoverage: coverage.global,
+      branches: triggers.branches,
+    } satisfies InstalledRepoSummary;
+  });
+
+  return summaries.sort((a, b) => a.fullName.localeCompare(b.fullName));
 }

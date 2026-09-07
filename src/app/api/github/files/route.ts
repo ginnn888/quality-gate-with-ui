@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { GitHubError, getRepo, listBranches, listSourceFiles } from "@/lib/github";
+import { GitHubError, getRepo, listBranches } from "@/lib/github";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// GET /api/github/files?owner=&repo=&ref=
-// The analysable source files in a repository ref, plus its branch list.
+// GET /api/github/files?owner=&repo=
+// Repo metadata + branch list — used by the install wizard.
 export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session?.accessToken) {
@@ -22,12 +22,10 @@ export async function GET(req: NextRequest) {
 
   try {
     const meta = await getRepo(session.accessToken, owner, repo);
-    const ref = (sp.get("ref") || "").trim() || meta.defaultBranch;
-    const [{ files, truncated }, branches] = await Promise.all([
-      listSourceFiles(session.accessToken, owner, repo, ref),
-      listBranches(session.accessToken, owner, repo).catch(() => [meta.defaultBranch]),
+    const branches = await listBranches(session.accessToken, owner, repo).catch(() => [
+      meta.defaultBranch,
     ]);
-    return NextResponse.json({ repo: meta, ref, branches, files, truncated });
+    return NextResponse.json({ repo: meta, ref: meta.defaultBranch, branches });
   } catch (e) {
     const status = e instanceof GitHubError ? e.status : 500;
     return NextResponse.json({ error: (e as Error).message }, { status });

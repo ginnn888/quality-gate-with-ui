@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { CheckCircle2, Globe2, Lock, Search } from "lucide-react";
 import type { GitHubRepo } from "@/lib/github";
-import type { InstallationSummaryRow } from "@/lib/types";
+import type { InstalledRepoSummary } from "@/lib/types";
 
 type Visibility = "all" | "public" | "private";
 
@@ -21,7 +21,7 @@ export default function ReposPage() {
     fetch("/api/installations")
       .then((r) => r.json())
       .then((d) => {
-        const rows = (d.installations ?? []) as InstallationSummaryRow[];
+        const rows = (d.installations ?? []) as InstalledRepoSummary[];
         setInstalled(new Set(rows.map((r) => r.fullName.toLowerCase())));
       })
       .catch(() => {});

@@ -1,134 +1,67 @@
 // Shared types for the Quality Gate console.
-// The `Report` shape mirrors the `summary` object produced by
-// Automated-Quality-Gate/generate-tests.js so the UI renders the same data
-// that would otherwise land in a GitHub PR comment.
-
-export type StepStatus = "pass" | "fail" | "skip" | "warn" | "running";
-
-export interface WorkflowStep {
-  name: string;
-  status: StepStatus;
-  durationMs: number;
-  log: string;
-}
-
-export type ReviewStatus = "clean" | "suspicious" | "buggy";
-
-export interface FileReview {
-  status: ReviewStatus;
-  findings: string;
-  remediation: string;
-}
-
-export interface FileClassification {
-  importance: "critical" | "high" | "medium" | "low";
-  min_coverage_threshold: number;
-  targetCoverage: number;
-  focus_areas: string[];
-  description: string;
-  review: FileReview;
-}
-
-export interface FileCoverageStatus {
-  actual: number;
-  required: number;
-  pass: boolean;
-}
-
-export interface AuditReport {
-  critical: number;
-  high: number;
-  moderate: number;
-  low: number;
-  isSecure: boolean;
-  details: string[];
-}
-
-export interface SonarReport {
-  enabled: boolean;
-  /** false when Sonar is enabled but the API returned no usable analysis for this project/token */
-  available: boolean;
-  passed: boolean;
-  metrics: {
-    bugs: string | number;
-    vulnerabilities: string | number;
-    code_smells: string | number;
-    security_hotspots: string | number;
-  };
-  issues: { severity: string; message: string; component: string; line?: number }[];
-}
-
-export interface CoverageSummary {
-  statements: number;
-  branches: number;
-  functions: number;
-  lines: number;
-  required: number;
-}
-
-export interface Report {
-  modifiedFiles: string[];
-  classifications: Record<string, FileClassification>;
-  fileStatus: Record<string, FileCoverageStatus>;
-  audit: AuditReport;
-  sonar: SonarReport;
-  coverage: CoverageSummary;
-  coverageMet: boolean;
-  jestPassed: boolean;
-  testsGenerated: number;
-  analysis: string | null;
-  sonarAnalysis: string | null;
-  success: boolean;
-}
-
-export interface RunConfig {
-  globalCoverage: number;
-  perFileCoverage: Record<string, number>;
-  enableSonar: boolean;
-  enableAiReview: boolean;
-}
+//
+// The console does not run any analysis itself. It installs the Automated
+// Quality Gate GitHub Action onto a repository, tunes its coverage config, and
+// reads back what the Action posts to each pull request. Everything here
+// describes either the files committed into a repo or data pulled from GitHub.
 
 /** GitHub events the installed workflow reacts to. */
 export type GateEvent = "push" | "pull_request";
 
 /**
- * The thresholds + trigger config the console commits to a repo as
- * `quality-gate.config.json` when the gate is installed. A superset of
- * `RunConfig`: the extra fields drive how the workflow YAML is generated.
+ * `config_cov.json` — the file the Automated Quality Gate action reads for its
+ * coverage thresholds. Shape matches `generate-tests.js` (`qgConfig.global`,
+ * `qgConfig.files[path]`).
  */
-export interface GateConfig extends RunConfig {
-  /** branches the workflow runs on (push + pull_request targets) */
+export interface CoverageConfig {
+  /** global statement-coverage target, 0–100 */
+  global: number;
+  /** per-file overrides, keyed by repo-relative path e.g. "src/math.js" */
+  files: Record<string, number>;
+}
+
+/**
+ * Trigger settings baked into the generated workflow YAML. Not read by the
+ * action — they only shape the `on:` block of `.github/workflows/quality-gate.yml`.
+ */
+export interface WorkflowTriggers {
   branches: string[];
   events: GateEvent[];
 }
 
-/** One repository the console has installed the quality gate onto. */
-export interface InstallationRecord {
-  fullName: string;
-  owner: string;
-  name: string;
-  private: boolean;
-  htmlUrl: string;
-  defaultBranch: string;
-  installedBy: RunOwner;
-  installedAt: string;
-  updatedAt: string;
-  config: GateConfig;
-  workflowPath: string;
-  configPath: string;
+/** Which Actions secrets the target repo already has (names only — values never leave GitHub). */
+export interface RepoSecretState {
+  geminiApiKey: boolean;
+  sonarToken: boolean;
+  /** false when the token cannot read the repo's secret list (needs admin) */
+  readable: boolean;
 }
 
-export interface InstallationSummaryRow {
+/** Everything the console needs to render and edit one installed repository. */
+export interface InstalledRepo {
   fullName: string;
   owner: string;
   name: string;
   private: boolean;
   htmlUrl: string;
   defaultBranch: string;
-  branches: string[];
-  installedAt: string;
-  updatedAt: string;
+  coverage: CoverageConfig;
+  triggers: WorkflowTriggers;
+  hasWorkflow: boolean;
+  hasConfig: boolean;
+  secrets: RepoSecretState;
+}
+
+/** Compact row for the installed-repos dashboard. */
+export interface InstalledRepoSummary {
+  fullName: string;
+  owner: string;
+  name: string;
+  private: boolean;
+  htmlUrl: string;
+  defaultBranch: string;
   globalCoverage: number;
+  branches: string[];
 }
 
 /** A GitHub Actions workflow run, as shown on the installation detail page. */
@@ -144,48 +77,25 @@ export interface WorkflowRunRow {
   createdAt: string;
 }
 
-/** Where the analysed code came from. */
-export interface RunSource {
-  kind: "upload" | "repo";
-  repo?: {
-    fullName: string;
-    owner: string;
-    name: string;
-    ref: string;
-    private: boolean;
-    htmlUrl: string;
-  };
+/** One pull request on an installed repo. */
+export interface PullRequestRow {
+  number: number;
+  title: string;
+  htmlUrl: string;
+  headBranch: string;
+  headSha: string;
+  author: string;
+  updatedAt: string;
 }
 
-/** The GitHub account that started the run — runs are private to their owner. */
-export interface RunOwner {
-  login: string;
-  name?: string | null;
-  image?: string | null;
-}
-
-export interface RunRecord {
-  id: string;
-  createdAt: string;
-  engine: "simulation" | "live";
-  durationMs: number;
-  config: RunConfig;
-  /** `path` is the repository path when the run came from a repo. */
-  files: { name: string; size: number; path?: string }[];
-  steps: WorkflowStep[];
-  report: Report;
-  markdown: string;
-  owner?: RunOwner;
-  source?: RunSource;
-}
-
-export interface RunSummaryRow {
-  id: string;
-  createdAt: string;
-  engine: "simulation" | "live";
-  success: boolean;
-  fileCount: number;
-  durationMs: number;
-  repoFullName?: string;
-  sourceKind?: "upload" | "repo";
+/** A pull request plus the Quality Gate outcome the Action reported on it. */
+export interface GatePrResult {
+  pr: PullRequestRow;
+  /** latest workflow run for this PR's head sha */
+  runStatus: string | null;
+  runConclusion: string | null;
+  runHtmlUrl: string | null;
+  /** the Automated Quality Gate report comment body, if one has been posted */
+  reportMarkdown: string | null;
+  reportedAt: string | null;
 }

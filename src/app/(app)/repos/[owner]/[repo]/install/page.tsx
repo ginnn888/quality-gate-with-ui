@@ -3,19 +3,10 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Loader2, PackagePlus } from "lucide-react";
-import { GateConfigPanel } from "@/components/GateConfigPanel";
+import { ArrowLeft, KeyRound, Loader2, PackagePlus } from "lucide-react";
+import { CoverageConfigForm } from "@/components/CoverageConfigForm";
 import { SignOutButton } from "@/components/SignOutButton";
-import type { GateConfig } from "@/lib/types";
-
-const DEFAULT: GateConfig = {
-  globalCoverage: 80,
-  perFileCoverage: {},
-  enableSonar: true,
-  enableAiReview: true,
-  branches: [],
-  events: ["push", "pull_request"],
-};
+import type { CoverageConfig, WorkflowTriggers } from "@/lib/types";
 
 export default function InstallPage() {
   const params = useParams<{ owner: string; repo: string }>();
@@ -24,8 +15,15 @@ export default function InstallPage() {
   const router = useRouter();
 
   const [branches, setBranches] = useState<string[]>([]);
-  const [defaultBranch, setDefaultBranch] = useState<string>("main");
-  const [config, setConfig] = useState<GateConfig>(DEFAULT);
+  const [defaultBranch, setDefaultBranch] = useState("main");
+  const [coverage, setCoverage] = useState<CoverageConfig>({ global: 80, files: {} });
+  const [triggers, setTriggers] = useState<WorkflowTriggers>({
+    branches: [],
+    events: ["push", "pull_request"],
+  });
+  const [geminiKey, setGeminiKey] = useState("");
+  const [sonarToken, setSonarToken] = useState("");
+
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,7 +42,7 @@ export default function InstallPage() {
         const db = d.repo?.defaultBranch || d.ref || "main";
         setDefaultBranch(db);
         setBranches(d.branches ?? [db]);
-        setConfig((c) => ({ ...c, branches: [db] }));
+        setTriggers((t) => ({ ...t, branches: [db] }));
       })
       .catch((e) => alive && setError(e.message))
       .finally(() => alive && setLoading(false));
@@ -54,7 +52,7 @@ export default function InstallPage() {
   }, [owner, repo]);
 
   async function install() {
-    if (config.branches.length === 0) return;
+    if (triggers.branches.length === 0 || !geminiKey.trim()) return;
     setSubmitting(true);
     setError(null);
     setScopeError(false);
@@ -62,7 +60,14 @@ export default function InstallPage() {
       const res = await fetch("/api/installations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ owner, repo, config }),
+        body: JSON.stringify({
+          owner,
+          repo,
+          coverage,
+          triggers,
+          geminiApiKey: geminiKey.trim(),
+          sonarToken: sonarToken.trim() || undefined,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -75,6 +80,8 @@ export default function InstallPage() {
       setSubmitting(false);
     }
   }
+
+  const ready = triggers.branches.length > 0 && !!geminiKey.trim();
 
   return (
     <div className="space-y-6">
@@ -91,8 +98,8 @@ export default function InstallPage() {
           Install the gate on <span className="font-mono">{owner}/{repo}</span>
         </h1>
         <p className="mt-1 text-sm text-gate-muted">
-          Set the pass/fail thresholds and triggers, then install. You can change all of this
-          later, or uninstall.
+          Set the coverage targets and triggers, provide the API key the action needs, then
+          install. Everything is editable later, or you can uninstall.
         </p>
       </section>
 
@@ -102,25 +109,71 @@ export default function InstallPage() {
         </p>
       ) : (
         <>
-          <GateConfigPanel
-            config={config}
-            onChange={setConfig}
+          <CoverageConfigForm
+            coverage={coverage}
+            triggers={triggers}
+            onCoverageChange={setCoverage}
+            onTriggersChange={setTriggers}
             branchOptions={branches}
             disabled={submitting}
           />
 
+          <div className="space-y-3 rounded-xl border border-gate-border bg-gate-panel p-4 shadow-card">
+            <h3 className="flex items-center gap-2 text-sm font-semibold text-gate-text">
+              <KeyRound className="h-4 w-4 text-gate-muted" aria-hidden />
+              Repository secrets
+            </h3>
+            <p className="text-[11px] leading-relaxed text-gate-muted">
+              Stored encrypted as GitHub Actions secrets on{" "}
+              <span className="font-mono">{owner}/{repo}</span> — the console never keeps them.
+            </p>
+
+            <label className="block">
+              <span className="text-xs text-gate-muted">
+                Google Gemini API key <span className="text-gate-fail">*</span>
+              </span>
+              <input
+                type="password"
+                autoComplete="off"
+                value={geminiKey}
+                disabled={submitting}
+                onChange={(e) => setGeminiKey(e.target.value)}
+                placeholder="AIza…"
+                className="mt-1 w-full rounded-lg border border-gate-border bg-gate-panel px-3 py-2 text-sm text-gate-text outline-none focus:border-gate-accent"
+              />
+              <span className="mt-1 block text-[11px] text-gate-muted">
+                Saved as the <span className="font-mono">GEMINI_API_KEY</span> secret. The gate
+                cannot run without it.
+              </span>
+            </label>
+
+            <label className="block">
+              <span className="text-xs text-gate-muted">SonarCloud token (optional)</span>
+              <input
+                type="password"
+                autoComplete="off"
+                value={sonarToken}
+                disabled={submitting}
+                onChange={(e) => setSonarToken(e.target.value)}
+                placeholder="leave blank to skip SonarCloud"
+                className="mt-1 w-full rounded-lg border border-gate-border bg-gate-panel px-3 py-2 text-sm text-gate-text outline-none focus:border-gate-accent"
+              />
+              <span className="mt-1 block text-[11px] text-gate-muted">
+                Saved as <span className="font-mono">SONAR_TOKEN</span>. When set, the workflow
+                also runs a SonarCloud scan.
+              </span>
+            </label>
+          </div>
+
           <div className="rounded-xl border border-gate-border bg-gate-accentSoft/40 p-4 text-xs text-gate-muted">
-            Installing commits two files to{" "}
-            <code className="text-gate-text">{defaultBranch}</code>:
+            Installing commits two files to <code className="text-gate-text">{defaultBranch}</code>:
             <ul className="mt-1.5 list-disc pl-5 font-mono">
               <li>.github/workflows/quality-gate.yml</li>
-              <li>quality-gate.config.json</li>
+              <li>config_cov.json</li>
             </ul>
             <p className="mt-2">
-              To actually block merges on a red gate, add a branch-protection rule requiring the
-              <span className="font-mono"> Quality Gate </span> check on GitHub. For the live
-              Gemini engine, add a <span className="font-mono">GEMINI_API_KEY</span> repo secret —
-              otherwise the gate runs the dependency-free simulation.
+              To block merges on a red gate, add a branch-protection rule requiring the
+              <span className="font-mono"> Quality Gate </span> check on GitHub.
             </p>
           </div>
 
@@ -138,7 +191,7 @@ export default function InstallPage() {
 
           <button
             onClick={install}
-            disabled={submitting || config.branches.length === 0}
+            disabled={submitting || !ready}
             className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-gate-accent to-gate-blue px-4 py-2.5 text-sm font-semibold text-white shadow-card transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {submitting ? (
