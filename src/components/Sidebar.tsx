@@ -28,7 +28,7 @@ export function Sidebar({ userMenu }: { userMenu: React.ReactNode }) {
       className="flex items-center gap-2.5 text-sm font-semibold text-gate-text"
       onClick={() => setOpen(false)}
     >
-      <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-gate-accent to-gate-blue text-white shadow-card">
+      <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-gate-accent via-gate-blue to-gate-green text-white shadow-glow">
         <ShieldCheck className="h-[18px] w-[18px]" aria-hidden />
       </span>
       Quality Gate
@@ -44,10 +44,10 @@ export function Sidebar({ userMenu }: { userMenu: React.ReactNode }) {
             key={href}
             href={href}
             onClick={() => setOpen(false)}
-            className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition ${
+            className={`flex items-center gap-2.5 rounded-lg border-l-2 px-3 py-2 text-sm font-medium transition ${
               active
-                ? "bg-gate-accentSoft text-gate-accent"
-                : "text-gate-muted hover:bg-gate-accent/5 hover:text-gate-text"
+                ? "border-gate-accent bg-gate-accentSoft text-gate-accent"
+                : "border-transparent text-gate-muted hover:bg-gate-accent/5 hover:text-gate-text"
             }`}
           >
             <Icon className="h-4 w-4 shrink-0" aria-hidden />

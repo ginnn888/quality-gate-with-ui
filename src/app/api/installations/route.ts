@@ -3,7 +3,6 @@ import { auth } from "@/lib/auth";
 import { commitFiles, getRepo } from "@/lib/github";
 import { getInstalledRepo, listInstalledRepos } from "@/lib/installations";
 import { setRepoSecret } from "@/lib/githubSecrets";
-import { readVendoredAction } from "@/lib/qgAction";
 import {
   buildCoverageConfigJson,
   buildWorkflowYaml,
@@ -31,9 +30,10 @@ export async function GET() {
   }
 }
 
-// POST /api/installations — commit the workflow, config_cov.json and the vendored
-// Automated Quality Gate action into a repo (one commit), and set the
-// GEMINI_API_KEY / SONAR_TOKEN repo secrets the action needs.
+// POST /api/installations — commit the workflow + config_cov.json into a repo
+// (one commit) and set the GEMINI_API_KEY / SONAR_TOKEN repo secrets the gate
+// needs. The gate itself is pulled from ginnn888/aqg-github-marketplace at run
+// time, so nothing else is written into the repo.
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.accessToken) {
@@ -72,7 +72,6 @@ export async function POST(req: NextRequest) {
     }
     const branch = meta.defaultBranch;
 
-    const actionFiles = await readVendoredAction();
     await commitFiles(
       token,
       owner,
@@ -81,7 +80,6 @@ export async function POST(req: NextRequest) {
       [
         { path: WORKFLOW_PATH, contentUtf8: buildWorkflowYaml(triggers) },
         { path: CONFIG_PATH, contentUtf8: buildCoverageConfigJson(coverage) },
-        ...actionFiles,
       ],
       "Install Automated Quality Gate",
     );

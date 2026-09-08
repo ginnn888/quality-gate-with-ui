@@ -1,3 +1,0 @@
-# The vendored action is committed verbatim into user repos — never munge it.
-vendor/quality-gate-action/dist/index.js -text
-vendor/quality-gate-action/action.yml text eol=lf

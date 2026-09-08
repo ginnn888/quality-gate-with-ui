@@ -173,23 +173,13 @@ export default function InstallationDetailPage() {
         </div>
       ) : (
         <>
-          {(!record.hasConfig || !record.hasAction) && (
+          {!record.hasConfig && (
             <div className="flex items-center gap-3 rounded-lg border border-gate-warn/40 bg-gate-warn/10 p-3 text-sm text-gate-warn">
               <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
               <span>
-                {!record.hasAction ? (
-                  <>
-                    The gate action under <span className="font-mono">.quality-gate/</span> is
-                    missing on <span className="font-mono">{record.defaultBranch}</span> — the
-                    workflow will fail.{" "}
-                  </>
-                ) : (
-                  <>
-                    <span className="font-mono">config_cov.json</span> is missing on{" "}
-                    <span className="font-mono">{record.defaultBranch}</span>.{" "}
-                  </>
-                )}
-                Click <strong>Save changes</strong> to re-commit it.
+                <span className="font-mono">config_cov.json</span> is missing on{" "}
+                <span className="font-mono">{record.defaultBranch}</span>. Click{" "}
+                <strong>Save changes</strong> to re-commit it.
               </span>
             </div>
           )}
@@ -225,8 +215,9 @@ export default function InstallationDetailPage() {
             </button>
             <p className="text-[11px] text-gate-muted">
               Saving re-commits <span className="font-mono">config_cov.json</span> and{" "}
-              <span className="font-mono">.github/workflows/quality-gate.yml</span> (and repairs the
-              gate bundle if it&apos;s missing) — use it to pull in console updates too.
+              <span className="font-mono">.github/workflows/quality-gate.yml</span> — use it to pull
+              in console updates too. The gate itself is always fetched fresh from{" "}
+              <span className="font-mono">ginnn888/aqg-github-marketplace</span> at run time.
             </p>
           </div>
 

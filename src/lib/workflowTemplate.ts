@@ -3,19 +3,31 @@ import type { CoverageConfig, GateEvent, WorkflowTriggers } from "./types";
 // The two files the console commits to a repository when the gate is installed:
 //   .github/workflows/quality-gate.yml  — the GitHub Actions workflow
 //   config_cov.json                     — the coverage thresholds the action reads
+//
+// The analysis itself is NOT vendored into the repo. The workflow calls the
+// Automated Quality Gate straight from its source repository with
+// `uses: ginnn888/aqg-github-marketplace@<ref>`, so every run pulls the current
+// version of the gate and there is nothing to keep in sync.
 
 export const WORKFLOW_PATH = ".github/workflows/quality-gate.yml";
 export const CONFIG_PATH = "config_cov.json";
 
-/** The Automated Quality Gate bundle is committed into the target repo here. */
-export const ACTION_DIR = ".quality-gate";
+/** The Automated Quality Gate action, consumed directly from its repo. */
+export const AQG_ACTION_REPO = "ginnn888/aqg-github-marketplace";
+/** Git ref of the action to pin the workflow to. `main` tracks the latest gate. */
+export const AQG_ACTION_REF = (process.env.AQG_ACTION_REF || "main").trim() || "main";
+/** `owner/repo@ref` as it appears in the generated `uses:` line. */
+export const AQG_ACTION_USES = `${AQG_ACTION_REPO}@${AQG_ACTION_REF}`;
+
 /** Every file the console writes into a target repo, for drift checks + uninstall. */
-export const MANAGED_PATHS = [
-  WORKFLOW_PATH,
-  CONFIG_PATH,
-  `${ACTION_DIR}/action.yml`,
-  `${ACTION_DIR}/dist/index.js`,
-];
+export const MANAGED_PATHS = [WORKFLOW_PATH, CONFIG_PATH];
+
+/**
+ * Files an older console version vendored into repos under `.quality-gate/`.
+ * Nothing writes these any more; uninstall still sweeps them so upgraded
+ * installs don't leave a dead action bundle behind.
+ */
+export const LEGACY_PATHS = [".quality-gate/action.yml", ".quality-gate/dist/index.js"];
 
 export const DEFAULT_COVERAGE: CoverageConfig = { global: 80, files: {} };
 export const DEFAULT_TRIGGERS: WorkflowTriggers = {
@@ -89,6 +101,8 @@ export function buildWorkflowYaml(triggers: WorkflowTriggers): string {
     .join("\n");
 
   return `# Managed by the Quality Gate console — reconfigure or remove it from the console.
+# The analysis is the Automated Quality Gate, pulled straight from
+# github.com/${AQG_ACTION_REPO} on every run (ref: ${AQG_ACTION_REF}).
 name: Quality Gate
 
 on:
@@ -104,20 +118,20 @@ jobs:
   quality-gate:
     runs-on: ubuntu-latest
     env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-      GEMINI_API_KEY: \${{ secrets.GEMINI_API_KEY }}
+      # Job-level so the SonarCloud step's \`if:\` can see whether the secret is set.
       SONAR_TOKEN: \${{ secrets.SONAR_TOKEN }}
-      GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      # No \`cache: npm\` here on purpose — the gate installs onto arbitrary repos,
+      # and setup-node's cache errors when there is no lockfile anywhere.
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '20'
 
       # Only when this repo is actually an npm project. A repo without a
       # package.json still runs the gate — it just has nothing to test.
@@ -131,11 +145,6 @@ jobs:
             echo "::notice::No package.json in this repository — skipping dependency install."
           fi
 
-      # Phase 1: AI review + test generation + coverage/audit gate. Writes state.
-      - name: Quality Gate (prepare)
-        if: always()
-        run: node ${ACTION_DIR}/dist/index.js --prepare
-
       # SonarCloud runs only when a SONAR_TOKEN repo secret is set; a missing
       # sonar-project.properties must not fail the whole workflow.
       - name: SonarCloud Scan
@@ -146,10 +155,14 @@ jobs:
           GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: \${{ secrets.SONAR_TOKEN }}
 
-      # Phase 2: fetch Sonar status, assemble the report, post it to the PR,
-      # and exit non-zero when the gate failed.
-      - name: Quality Gate (report)
+      # AI review + test generation + coverage/audit/Sonar gate. Posts the full
+      # report as a PR comment and exits non-zero when the gate fails.
+      - name: Automated Quality Gate
         if: always()
-        run: node ${ACTION_DIR}/dist/index.js --report
+        uses: ${AQG_ACTION_USES}
+        with:
+          gemini_api_key: \${{ secrets.GEMINI_API_KEY }}
+          sonar_token: \${{ secrets.SONAR_TOKEN }}
+          github_token: \${{ secrets.GITHUB_TOKEN }}
 `;
 }

@@ -168,8 +168,12 @@ export default function InstallPage() {
             <ul className="mt-1.5 list-disc pl-5 font-mono">
               <li>.github/workflows/quality-gate.yml</li>
               <li>config_cov.json</li>
-              <li>.quality-gate/ &nbsp;— the gate action itself (runs via <span>uses: ./.quality-gate</span>)</li>
             </ul>
+            <p className="mt-2">
+              The workflow runs the gate straight from{" "}
+              <span className="font-mono">ginnn888/aqg-github-marketplace</span> — nothing else is
+              added to your repo, and every run uses the current version of the gate.
+            </p>
             <p className="mt-2">
               To block merges on a red gate, add a branch-protection rule requiring the
               <span className="font-mono"> Quality Gate </span> check on GitHub.

@@ -1,9 +1,35 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronRight, ExternalLink, GitPullRequest } from "lucide-react";
+import {
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  ExternalLink,
+  GitPullRequest,
+  MinusCircle,
+  XCircle,
+} from "lucide-react";
 import { MarkdownReport } from "@/components/MarkdownReport";
 import type { GatePrResult } from "@/lib/types";
+
+function VerdictBadge({ verdict }: { verdict: GatePrResult["reportVerdict"] }) {
+  if (!verdict) return null;
+  const map = {
+    pass: { cls: "bg-gate-pass/15 text-gate-pass", Icon: CheckCircle2, label: "PASS" },
+    fail: { cls: "bg-gate-fail/15 text-gate-fail", Icon: XCircle, label: "FAIL" },
+    skipped: { cls: "bg-gate-skip/15 text-gate-muted", Icon: MinusCircle, label: "SKIPPED" },
+  } as const;
+  const { cls, Icon, label } = map[verdict];
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${cls}`}
+    >
+      <Icon className="h-3 w-3" aria-hidden />
+      {label}
+    </span>
+  );
+}
 
 function StatusPill({ result }: { result: GatePrResult }) {
   const { runStatus, runConclusion } = result;
@@ -53,6 +79,7 @@ export function PrGateResults({ pulls }: { pulls: GatePrResult[] }) {
               >
                 <span className="font-mono text-gate-muted">#{r.pr.number}</span> {r.pr.title}
               </a>
+              <VerdictBadge verdict={r.reportVerdict} />
               <StatusPill result={r} />
               {r.runHtmlUrl && (
                 <a

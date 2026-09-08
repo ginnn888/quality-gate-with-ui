@@ -12,9 +12,9 @@ import {
 } from "@/lib/github";
 import { getInstalledRepo } from "@/lib/installations";
 import { setRepoSecret } from "@/lib/githubSecrets";
-import { readVendoredAction } from "@/lib/qgAction";
 import {
   CONFIG_PATH,
+  LEGACY_PATHS,
   MANAGED_PATHS,
   WORKFLOW_PATH,
   buildCoverageConfigJson,
@@ -47,6 +47,21 @@ async function guard(ctx: Ctx) {
     return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
   }
   return { token: session.accessToken, owner, repo, record };
+}
+
+/** Parse the PASS / FAIL / SKIPPED verdict out of a posted gate report. */
+function verdictFromReport(markdown: string | null): GatePrResult["reportVerdict"] {
+  if (!markdown) return null;
+  if (/Result:\s*✅\s*PASS\s*\(Skipped\)/i.test(markdown) || /checks were skipped/i.test(markdown)) {
+    return "skipped";
+  }
+  if (/Overall Result:\s*✅\s*PASS/i.test(markdown) || /Overall Result:\s*PASS/i.test(markdown)) {
+    return "pass";
+  }
+  if (/Overall Result:\s*❌\s*FAIL/i.test(markdown) || /Overall Result:\s*FAIL/i.test(markdown)) {
+    return "fail";
+  }
+  return null;
 }
 
 /** For each open PR: its latest gate run and the report comment the action posted. */
@@ -88,6 +103,7 @@ async function gatePrResults(
       runHtmlUrl: run?.htmlUrl ?? null,
       reportMarkdown,
       reportedAt,
+      reportVerdict: verdictFromReport(reportMarkdown),
     } satisfies GatePrResult;
   });
 }
@@ -106,9 +122,9 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
   return NextResponse.json({ record, runs, pulls });
 }
 
-// PATCH — change coverage / triggers (re-commit config_cov.json, plus the
-// workflow when triggers changed), repair the action files if they drifted, and
-// optionally refresh a secret. All file writes land in one commit.
+// PATCH — change coverage / triggers. Always re-commits config_cov.json and the
+// workflow (idempotent, tiny) so console template updates reach existing
+// installs on any Save. Optionally refreshes a secret. All writes land in one commit.
 export async function PATCH(req: NextRequest, ctx: Ctx) {
   const g = await guard(ctx);
   if ("error" in g) return g.error;
@@ -119,7 +135,6 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     triggers?: unknown;
     geminiApiKey?: string;
     sonarToken?: string;
-    repairAction?: boolean;
   } | null;
 
   const coverage = normalizeCoverageConfig(body?.coverage ?? record.coverage);
@@ -127,17 +142,17 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const branch = record.defaultBranch;
 
   try {
-    // Always rewrite the workflow + config (idempotent, tiny) so template
-    // changes reach existing installs on any Save. Re-commit the action bundle
-    // too when it has drifted or a repair was asked for.
-    const files: { path: string; contentUtf8: string }[] = [
-      { path: WORKFLOW_PATH, contentUtf8: buildWorkflowYaml(triggers) },
-      { path: CONFIG_PATH, contentUtf8: buildCoverageConfigJson(coverage) },
-    ];
-    if (body?.repairAction || !record.hasAction) {
-      files.push(...(await readVendoredAction()));
-    }
-    await commitFiles(token, owner, repo, branch, files, "Update Automated Quality Gate");
+    await commitFiles(
+      token,
+      owner,
+      repo,
+      branch,
+      [
+        { path: WORKFLOW_PATH, contentUtf8: buildWorkflowYaml(triggers) },
+        { path: CONFIG_PATH, contentUtf8: buildCoverageConfigJson(coverage) },
+      ],
+      "Update Automated Quality Gate",
+    );
 
     const warnings: string[] = [];
     for (const [name, value] of [
@@ -169,7 +184,7 @@ export async function DELETE(_req: NextRequest, ctx: Ctx) {
   try {
     const present: string[] = [];
     await Promise.all(
-      MANAGED_PATHS.map(async (p) => {
+      [...MANAGED_PATHS, ...LEGACY_PATHS].map(async (p) => {
         const meta = await getContentMeta(token, owner, repo, p, branch).catch(() => null);
         if (meta) present.push(p);
       }),

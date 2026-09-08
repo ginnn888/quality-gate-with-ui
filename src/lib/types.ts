@@ -49,8 +49,6 @@ export interface InstalledRepo {
   triggers: WorkflowTriggers;
   hasWorkflow: boolean;
   hasConfig: boolean;
-  /** the vendored action files are present under .quality-gate/ */
-  hasAction: boolean;
   secrets: RepoSecretState;
 }
 
@@ -100,4 +98,6 @@ export interface GatePrResult {
   /** the Automated Quality Gate report comment body, if one has been posted */
   reportMarkdown: string | null;
   reportedAt: string | null;
+  /** PASS / FAIL / SKIPPED, parsed from the posted report */
+  reportVerdict: "pass" | "fail" | "skipped" | null;
 }

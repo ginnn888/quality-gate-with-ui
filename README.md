@@ -5,12 +5,17 @@ any analysis itself — it is purely the front door:
 
 1. **Sign in with GitHub.**
 2. **Install** the gate onto a repository — the console commits a workflow file
-   and a `config_cov.json`, and sets the repo secrets the action needs.
+   and a `config_cov.json`, and sets the repo secrets the action needs. The
+   workflow calls the gate straight from
+   [`ginnn888/aqg-github-marketplace`](https://github.com/ginnn888/aqg-github-marketplace)
+   (`uses: ginnn888/aqg-github-marketplace@main`) — nothing else is written into
+   the repo.
 3. **Tune** the coverage thresholds from the web; saving re-commits
    `config_cov.json` to the repo.
 4. From then on **GitHub Actions runs the gate** on every push / pull request.
    The verdict is posted to the pull request.
-5. The console **reads those results back** from GitHub and shows them per PR.
+5. The console **reads those results back** from GitHub and shows them per PR,
+   with a PASS / FAIL / SKIPPED badge and the full report inline.
 
 Built with **Next.js 15 (App Router) · React 19 · TypeScript · Tailwind CSS · Auth.js v5**.
 
@@ -65,7 +70,8 @@ Installing makes **one commit** to the default branch with:
 | --- | --- |
 | `.github/workflows/quality-gate.yml` | Runs on the configured `push` / `pull_request` events. |
 | `config_cov.json` | `{ "global": 80, "files": { "src/x.js": 50 } }` — the coverage targets. |
-| `.quality-gate/` | The gate itself — the ncc-bundled `dist/index.js` (plus `action.yml`), vendored from `vendor/quality-gate-action/`. The workflow runs it directly, so there is no published action to depend on. |
+
+That's it — no action code is copied into the repo.
 
 ### There is no local database
 
@@ -75,34 +81,33 @@ the user's most-recently-pushed repositories for that file, and every
 installation view is read live from the repo's own contents. Nothing to
 provision, nothing to persist.
 
-### The vendored action
+### The generated workflow
 
-`vendor/quality-gate-action/` holds `action.yml` and `dist/index.js` — the
-Automated Quality Gate compiled to a single dependency-free bundle (ncc). The
-console commits these into every installed repo under `.quality-gate/`. The
-generated workflow mirrors the project's own `ci.yaml` — a tolerant
-`npm ci`/`install`/skip, then the two-phase run:
+`.github/workflows/quality-gate.yml` mirrors
+[`ginnn888/aqg-github-marketplace`](https://github.com/ginnn888/aqg-github-marketplace)'s
+own `ci.yaml` — checkout (`fetch-depth: 0`), Node 20, a tolerant
+`npm ci`/`install`/skip, an optional SonarCloud scan (only when a `SONAR_TOKEN`
+repo secret is set), then the gate itself:
 
 ```yaml
-      - name: Quality Gate (prepare)
+      - name: Automated Quality Gate
         if: always()
-        run: node .quality-gate/dist/index.js --prepare
-      # …SonarCloud scan (only if SONAR_TOKEN set)…
-      - name: Quality Gate (report)
-        if: always()
-        run: node .quality-gate/dist/index.js --report
+        uses: ginnn888/aqg-github-marketplace@main
+        with:
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          sonar_token: ${{ secrets.SONAR_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
-`--prepare` does the AI review + test-gen + coverage/audit gate and writes state;
-`--report` fetches the Sonar status, posts the report comment to the PR, and
-exits non-zero on a failing gate. Keys come from job-level `env:` mapped from the
-repo secrets. A repo with no `package.json` / no changed `src/` files still runs
-green (the gate reports "skipped").
+The gate does the AI review + test generation + coverage/audit/Sonar gate, posts
+the report comment to the PR (`## 🚀 AI-Powered Quality Gate Report`), and exits
+non-zero on a failing gate. A repo with no `package.json` / no changed `src/`
+files still runs green (the gate reports "skipped").
 
-To ship a new version of the gate, drop the rebuilt files into
-`vendor/quality-gate-action/` and redeploy; the detail page's **Save changes** /
-drift-repair re-commits them into a repo. `next.config.mjs` traces `vendor/**`
-into the install API routes so `fs` can read them at runtime.
+Because the workflow pins `@main`, every run uses the current version of the gate
+— there is nothing to keep in sync. Set `AQG_ACTION_REF` on the console to pin
+installs to a tag or commit SHA instead; **Save changes** on the detail page
+re-commits the workflow so an updated ref reaches existing installs.
 
 The **Gemini API key**: entered per-repo in the wizard, or left blank to fall
 back to the console's own `GEMINI_API_KEY` env var. Either way it is written as
@@ -152,10 +157,12 @@ src/
     github.ts                GitHub REST client (repos, contents R/W, runs, PRs, comments, secrets)
     githubSecrets.ts         sealed-box encryption for repo Actions secrets
     installations.ts         derives the installed view from a repo's own contents
-    workflowTemplate.ts      builds quality-gate.yml + config_cov.json
+    workflowTemplate.ts      builds quality-gate.yml (uses: ginnn888/aqg-github-marketplace@<ref>)
+                             + config_cov.json
     apiErrors.ts             maps GitHub write failures (esp. missing `workflow` scope)
     types.ts                 CoverageConfig / WorkflowTriggers / InstalledRepo / GatePrResult
-
-action/                      a from-scratch re-implementation of the gate — NOT used by
-                             the console anymore; kept for reference only
 ```
+
+The gate's own source lives in its repo:
+<https://github.com/ginnn888/aqg-github-marketplace>. The console never bundles or
+runs it — it only writes the workflow that calls it.

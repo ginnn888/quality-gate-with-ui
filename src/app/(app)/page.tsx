@@ -24,12 +24,14 @@ export default async function DashboardPage() {
       <section className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2 text-xl font-bold text-gate-text">
-            <PackageCheck className="h-5 w-5 text-gate-muted" aria-hidden />
+            <PackageCheck className="h-5 w-5 text-gate-accent" aria-hidden />
             Installed repositories
           </h1>
           <p className="mt-1 text-sm text-gate-muted">
-            Repositories running the Automated Quality Gate on every push and pull request. Open
-            one to tune coverage, manage secrets, or read the latest PR results.
+            Repositories running the Automated Quality Gate — pulled from{" "}
+            <span className="font-mono text-gate-text">ginnn888/aqg-github-marketplace</span> — on
+            every push and pull request. Open one to tune coverage, manage secrets, or read the
+            latest PR results.
           </p>
         </div>
         <Link

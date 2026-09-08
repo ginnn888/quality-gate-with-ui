@@ -7,35 +7,35 @@
 }
 
 body {
-  background: #f6f5fd;
+  background: #f7f5ff;
   background-image:
-    radial-gradient(680px circle at 4% -12%, rgba(124, 111, 239, 0.16), transparent 60%),
-    radial-gradient(620px circle at 102% -4%, rgba(79, 140, 247, 0.15), transparent 55%),
-    radial-gradient(720px circle at 88% 108%, rgba(142, 216, 196, 0.14), transparent 60%);
+    radial-gradient(700px circle at 2% -10%, rgba(124, 58, 237, 0.18), transparent 60%),
+    radial-gradient(640px circle at 104% -2%, rgba(37, 99, 235, 0.16), transparent 55%),
+    radial-gradient(760px circle at 90% 110%, rgba(16, 185, 129, 0.14), transparent 60%);
   background-attachment: fixed;
-  color: #211f35;
+  color: #171528;
 }
 
 /* Markdown report styling (react-markdown output) */
-.md-report h1 { font-size: 1.35rem; font-weight: 700; margin: 1rem 0 0.5rem; color: #211f35; }
-.md-report h2 { font-size: 1.1rem; font-weight: 700; margin: 1.25rem 0 0.5rem; color: #211f35; }
-.md-report h3 { font-size: 1rem; font-weight: 700; margin: 1rem 0 0.4rem; color: #211f35; }
-.md-report h4 { font-size: 0.95rem; font-weight: 600; margin: 0.8rem 0 0.3rem; color: #6e6b85; }
+.md-report h1 { font-size: 1.35rem; font-weight: 700; margin: 1rem 0 0.5rem; color: #171528; }
+.md-report h2 { font-size: 1.1rem; font-weight: 700; margin: 1.25rem 0 0.5rem; color: #171528; }
+.md-report h3 { font-size: 1rem; font-weight: 700; margin: 1rem 0 0.4rem; color: #171528; }
+.md-report h4 { font-size: 0.95rem; font-weight: 600; margin: 0.8rem 0 0.3rem; color: #6b6785; }
 .md-report p { margin: 0.4rem 0; line-height: 1.6; }
 .md-report ul { list-style: disc; padding-left: 1.4rem; margin: 0.4rem 0; }
 .md-report li { margin: 0.15rem 0; }
-.md-report hr { border: 0; border-top: 1px solid #e7e3f6; margin: 1rem 0; }
-.md-report a { color: #7c6fef; }
+.md-report hr { border: 0; border-top: 1px solid #e6e1f8; margin: 1rem 0; }
+.md-report a { color: #7c3aed; }
 .md-report code {
-  background: #efecfd;
-  color: #4c3fa3;
+  background: #ede7fe;
+  color: #5b21b6;
   padding: 0.1rem 0.35rem;
   border-radius: 4px;
   font-size: 0.85em;
 }
 .md-report pre {
-  background: #f8f7fd;
-  border: 1px solid #e7e3f6;
+  background: #f7f5ff;
+  border: 1px solid #e6e1f8;
   border-radius: 8px;
   padding: 0.8rem;
   overflow-x: auto;
@@ -43,11 +43,11 @@ body {
 }
 .md-report pre code { background: transparent; padding: 0; color: inherit; }
 .md-report blockquote {
-  border-left: 3px solid #e7e3f6;
+  border-left: 3px solid #e6e1f8;
   padding-left: 0.8rem;
-  color: #6e6b85;
+  color: #6b6785;
   margin: 0.5rem 0;
 }
 .md-report table { border-collapse: collapse; margin: 0.6rem 0; width: 100%; display: block; overflow-x: auto; }
-.md-report th, .md-report td { border: 1px solid #e7e3f6; padding: 0.4rem 0.7rem; text-align: left; }
-.md-report th { background: #f8f7fd; }
+.md-report th, .md-report td { border: 1px solid #e6e1f8; padding: 0.4rem 0.7rem; text-align: left; }
+.md-report th { background: #f7f5ff; }
