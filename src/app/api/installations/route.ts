@@ -53,6 +53,7 @@ export async function POST(req: NextRequest) {
     geminiApiKey?: string;
     sonarToken?: string;
     sonarOrg?: string;
+    openTestsPr?: boolean;
   } | null;
 
   if (!body?.owner || !body?.repo) {
@@ -70,6 +71,8 @@ export async function POST(req: NextRequest) {
   // sonar-project.properties so the gate can query SonarCloud without the user
   // hand-authoring that file.
   const sonarOrg = normalizeSonarOrg(body.sonarOrg ?? process.env.SONAR_ORGANIZATION);
+  const openTestsPr =
+    body.openTestsPr ?? String(process.env.AQG_OPEN_TESTS_PR).toLowerCase() === "true";
 
   try {
     const meta = await getRepo(token, owner, repo);
@@ -82,7 +85,7 @@ export async function POST(req: NextRequest) {
     const branch = meta.defaultBranch;
 
     const files = [
-      { path: WORKFLOW_PATH, contentUtf8: buildWorkflowYaml(triggers) },
+      { path: WORKFLOW_PATH, contentUtf8: buildWorkflowYaml(triggers, { openTestsPr }) },
       { path: CONFIG_PATH, contentUtf8: buildCoverageConfigJson(coverage) },
     ];
     const writesSonarProps = Boolean(sonarToken && sonarOrg);

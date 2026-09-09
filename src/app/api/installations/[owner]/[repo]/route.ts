@@ -140,6 +140,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     geminiApiKey?: string;
     sonarToken?: string;
     sonarOrg?: string;
+    openTestsPr?: boolean;
   } | null;
 
   const coverage = normalizeCoverageConfig(body?.coverage ?? record.coverage);
@@ -147,8 +148,16 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const branch = record.defaultBranch;
 
   try {
+    // Preserve the companion-PR setting across plain saves: honor an explicit
+    // body flag, else read it back from the currently committed workflow.
+    const currentWorkflow = await getFileText(token, owner, repo, WORKFLOW_PATH, branch).catch(
+      () => null,
+    );
+    const openTestsPr =
+      body?.openTestsPr ?? /open_tests_pr:\s*["']?true/i.test(currentWorkflow ?? "");
+
     const files = [
-      { path: WORKFLOW_PATH, contentUtf8: buildWorkflowYaml(triggers) },
+      { path: WORKFLOW_PATH, contentUtf8: buildWorkflowYaml(triggers, { openTestsPr }) },
       { path: CONFIG_PATH, contentUtf8: buildCoverageConfigJson(coverage) },
     ];
 

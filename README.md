@@ -67,6 +67,12 @@ secrets on the target repo — they never touch the console's environment.
   console also commits `sonar-project.properties`
   (`sonar.projectKey=<org>_<repo>`, the SonarCloud GitHub-import convention) so
   the gate can query SonarCloud without the user hand-authoring that file.
+- **Open a PR with the AI-generated tests** (optional) — when on, the generated
+  workflow gets `contents: write` and passes `open_tests_pr: "true"`. On every
+  pull-request run the gate publishes the generated suite + merged
+  `config_cov.json` + report to `aqg-tests/pr-<n>` and opens/refreshes a
+  companion PR into that PR's branch (skipped for PRs from forks).
+  `AQG_OPEN_TESTS_PR` sets the console-wide default.
 
 Installing makes **one commit** to the default branch with:
 

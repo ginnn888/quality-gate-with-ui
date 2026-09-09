@@ -24,6 +24,7 @@ export default function InstallPage() {
   const [geminiKey, setGeminiKey] = useState("");
   const [sonarToken, setSonarToken] = useState("");
   const [sonarOrg, setSonarOrg] = useState("");
+  const [openTestsPr, setOpenTestsPr] = useState(false);
   const [preflight, setPreflight] = useState<{ hasPackageJson: boolean; hasSrcDir: boolean } | null>(
     null,
   );
@@ -73,6 +74,7 @@ export default function InstallPage() {
           geminiApiKey: geminiKey.trim(),
           sonarToken: sonarToken.trim() || undefined,
           sonarOrg: sonarOrg.trim() || undefined,
+          openTestsPr,
         }),
       });
       const data = await res.json();
@@ -190,6 +192,29 @@ export default function InstallPage() {
               </span>
             </label>
           </div>
+
+          <label className="flex items-start gap-2 rounded-xl border border-gate-border bg-gate-panel p-4 text-sm shadow-card">
+            <input
+              type="checkbox"
+              checked={openTestsPr}
+              disabled={submitting}
+              onChange={(e) => setOpenTestsPr(e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-gate-accent"
+            />
+            <span>
+              <span className="font-semibold text-gate-text">
+                Open a PR with the AI-generated tests on each run
+              </span>
+              <span className="mt-1 block text-[11px] leading-relaxed text-gate-muted">
+                On every pull-request run the gate pushes the generated suite, the merged{" "}
+                <span className="font-mono">config_cov.json</span>, and the report to{" "}
+                <span className="font-mono">aqg-tests/pr-&lt;n&gt;</span> and opens (or refreshes) a
+                companion PR into that PR&apos;s branch. Adds{" "}
+                <span className="font-mono">contents: write</span> to the workflow. Skipped for PRs
+                from forks.
+              </span>
+            </span>
+          </label>
 
           {preflight && (!preflight.hasPackageJson || !preflight.hasSrcDir) && (
             <div className="rounded-lg border border-gate-warn/40 bg-gate-warn/10 p-3 text-xs text-gate-warn">

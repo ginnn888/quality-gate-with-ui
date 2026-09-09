@@ -117,10 +117,20 @@ export function buildSonarPropertiesFile(org: string, repo: string): string {
 
 const yamlList = (items: string[]) => `[${items.map((b) => JSON.stringify(b)).join(", ")}]`;
 
+export interface WorkflowOptions {
+  /**
+   * When true, the gate also publishes the AI-generated tests + merged
+   * config_cov.json + report to `aqg-tests/pr-<n>` and opens/refreshes a
+   * companion PR on every pull_request run. Needs `contents: write`.
+   */
+  openTestsPr?: boolean;
+}
+
 /** The `.github/workflows/quality-gate.yml` committed to the target repo. */
-export function buildWorkflowYaml(triggers: WorkflowTriggers): string {
+export function buildWorkflowYaml(triggers: WorkflowTriggers, opts: WorkflowOptions = {}): string {
   const events = triggers.events.length ? triggers.events : DEFAULT_TRIGGERS.events;
   const branches = triggers.branches.length ? triggers.branches : DEFAULT_TRIGGERS.branches;
+  const openTestsPr = Boolean(opts.openTestsPr);
 
   const on = events
     .map((e: GateEvent) => `  ${e}:\n    branches: ${yamlList(branches)}`)
@@ -135,7 +145,7 @@ on:
 ${on}
 
 permissions:
-  contents: read
+  contents: ${openTestsPr ? "write" : "read"}
   pull-requests: write
   statuses: write
   checks: write
@@ -190,5 +200,6 @@ jobs:
           gemini_api_key: \${{ secrets.GEMINI_API_KEY }}
           sonar_token: \${{ secrets.SONAR_TOKEN }}
           github_token: \${{ secrets.GITHUB_TOKEN }}
+          open_tests_pr: "${openTestsPr ? "true" : "false"}"
 `;
 }
