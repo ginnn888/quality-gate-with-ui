@@ -5,10 +5,13 @@ import { getInstalledRepo, listInstalledRepos } from "@/lib/installations";
 import { setRepoSecret } from "@/lib/githubSecrets";
 import {
   buildCoverageConfigJson,
+  buildSonarPropertiesFile,
   buildWorkflowYaml,
   CONFIG_PATH,
+  SONAR_PROPS_PATH,
   WORKFLOW_PATH,
   normalizeCoverageConfig,
+  normalizeSonarOrg,
   normalizeTriggers,
 } from "@/lib/workflowTemplate";
 import { installError } from "@/lib/apiErrors";
@@ -49,6 +52,7 @@ export async function POST(req: NextRequest) {
     triggers?: unknown;
     geminiApiKey?: string;
     sonarToken?: string;
+    sonarOrg?: string;
   } | null;
 
   if (!body?.owner || !body?.repo) {
@@ -62,6 +66,10 @@ export async function POST(req: NextRequest) {
   // The console's own env vars are the fallback for both secrets.
   const geminiApiKey = (body.geminiApiKey ?? "").trim() || (process.env.GEMINI_API_KEY ?? "").trim();
   const sonarToken = (body.sonarToken ?? "").trim() || (process.env.SONAR_TOKEN ?? "").trim();
+  // Optional. When present alongside a token, the console also commits
+  // sonar-project.properties so the gate can query SonarCloud without the user
+  // hand-authoring that file.
+  const sonarOrg = normalizeSonarOrg(body.sonarOrg ?? process.env.SONAR_ORGANIZATION);
 
   try {
     const meta = await getRepo(token, owner, repo);
@@ -73,17 +81,19 @@ export async function POST(req: NextRequest) {
     }
     const branch = meta.defaultBranch;
 
-    await commitFiles(
-      token,
-      owner,
-      repo,
-      branch,
-      [
-        { path: WORKFLOW_PATH, contentUtf8: buildWorkflowYaml(triggers) },
-        { path: CONFIG_PATH, contentUtf8: buildCoverageConfigJson(coverage) },
-      ],
-      "Install Automated Quality Gate",
-    );
+    const files = [
+      { path: WORKFLOW_PATH, contentUtf8: buildWorkflowYaml(triggers) },
+      { path: CONFIG_PATH, contentUtf8: buildCoverageConfigJson(coverage) },
+    ];
+    const writesSonarProps = Boolean(sonarToken && sonarOrg);
+    if (writesSonarProps) {
+      files.push({
+        path: SONAR_PROPS_PATH,
+        contentUtf8: buildSonarPropertiesFile(sonarOrg, repo),
+      });
+    }
+
+    await commitFiles(token, owner, repo, branch, files, "Install Automated Quality Gate");
 
     const warnings: string[] = [];
     for (const [name, value] of [
@@ -104,6 +114,11 @@ export async function POST(req: NextRequest) {
     if (!geminiApiKey) {
       warnings.push(
         "No Gemini API key available (none provided and GEMINI_API_KEY is not set on the console) — the gate cannot run until that repo secret is set.",
+      );
+    }
+    if (sonarToken && !sonarOrg) {
+      warnings.push(
+        "SONAR_TOKEN is set but no SonarCloud organization was provided, so sonar-project.properties was not written — the gate will skip SonarCloud until that file exists.",
       );
     }
 

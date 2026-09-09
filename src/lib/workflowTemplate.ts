@@ -12,6 +12,10 @@ import type { CoverageConfig, GateEvent, WorkflowTriggers } from "./types";
 
 export const WORKFLOW_PATH = ".github/workflows/quality-gate.yml";
 export const CONFIG_PATH = "config_cov.json";
+// Only committed when a SonarCloud organization is supplied at install/update
+// time. The Automated Quality Gate action reads `sonar.projectKey` from this
+// file to query the SonarCloud API; without it the action skips SonarCloud.
+export const SONAR_PROPS_PATH = "sonar-project.properties";
 
 /** The Automated Quality Gate action, consumed directly from its repo. */
 export const AQG_ACTION_REPO = "NonnaritRammaneekultawat-6609650459/test-github-marketplace";
@@ -20,8 +24,8 @@ export const AQG_ACTION_REF = (process.env.AQG_ACTION_REF || "main").trim() || "
 /** `owner/repo@ref` as it appears in the generated `uses:` line. */
 export const AQG_ACTION_USES = `${AQG_ACTION_REPO}@${AQG_ACTION_REF}`;
 
-/** Every file the console writes into a target repo, for drift checks + uninstall. */
-export const MANAGED_PATHS = [WORKFLOW_PATH, CONFIG_PATH];
+/** Every file the console may write into a target repo, for drift checks + uninstall. */
+export const MANAGED_PATHS = [WORKFLOW_PATH, CONFIG_PATH, SONAR_PROPS_PATH];
 
 /**
  * Files an older console version vendored into repos under `.quality-gate/`.
@@ -88,6 +92,27 @@ export function normalizeTriggers(input: unknown): WorkflowTriggers {
 /** Pretty-printed `config_cov.json`. */
 export function buildCoverageConfigJson(cfg: CoverageConfig): string {
   return JSON.stringify({ global: cfg.global, files: cfg.files }, null, 2) + "\n";
+}
+
+/** A SonarCloud organization key looks like `my-org` / `ginnn888` — no spaces. */
+export function normalizeSonarOrg(input: unknown): string {
+  const s = String(input ?? "").trim();
+  return /^[\w.-]+$/.test(s) ? s : "";
+}
+
+/**
+ * `sonar-project.properties` — committed only when a SonarCloud org is known.
+ * The project key follows SonarCloud's GitHub-import convention `<org>_<repo>`,
+ * which is also what the console's SonarCloud lookups assume.
+ */
+export function buildSonarPropertiesFile(org: string, repo: string): string {
+  return [
+    `sonar.projectKey=${org}_${repo}`,
+    `sonar.organization=${org}`,
+    "sonar.sources=src",
+    "sonar.javascript.lcov.reportPaths=coverage/lcov.info",
+    "",
+  ].join("\n");
 }
 
 const yamlList = (items: string[]) => `[${items.map((b) => JSON.stringify(b)).join(", ")}]`;

@@ -23,6 +23,10 @@ export default function InstallPage() {
   });
   const [geminiKey, setGeminiKey] = useState("");
   const [sonarToken, setSonarToken] = useState("");
+  const [sonarOrg, setSonarOrg] = useState("");
+  const [preflight, setPreflight] = useState<{ hasPackageJson: boolean; hasSrcDir: boolean } | null>(
+    null,
+  );
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -43,6 +47,7 @@ export default function InstallPage() {
         setDefaultBranch(db);
         setBranches(d.branches ?? [db]);
         setTriggers((t) => ({ ...t, branches: [db] }));
+        if (d.preflight) setPreflight(d.preflight);
       })
       .catch((e) => alive && setError(e.message))
       .finally(() => alive && setLoading(false));
@@ -67,6 +72,7 @@ export default function InstallPage() {
           triggers,
           geminiApiKey: geminiKey.trim(),
           sonarToken: sonarToken.trim() || undefined,
+          sonarOrg: sonarOrg.trim() || undefined,
         }),
       });
       const data = await res.json();
@@ -161,7 +167,52 @@ export default function InstallPage() {
                 also runs a SonarCloud scan.
               </span>
             </label>
+
+            <label className="block">
+              <span className="text-xs text-gate-muted">SonarCloud organization (optional)</span>
+              <input
+                type="text"
+                autoComplete="off"
+                value={sonarOrg}
+                disabled={submitting}
+                onChange={(e) => setSonarOrg(e.target.value)}
+                placeholder="e.g. my-org"
+                className="mt-1 w-full rounded-lg border border-gate-border bg-gate-panel px-3 py-2 text-sm text-gate-text outline-none focus:border-gate-accent"
+              />
+              <span className="mt-1 block text-[11px] text-gate-muted">
+                With a token, the console also commits{" "}
+                <span className="font-mono">sonar-project.properties</span> (
+                <span className="font-mono">
+                  {(sonarOrg.trim() || "<org>")}_{repo}
+                </span>
+                ) so the gate can read SonarCloud without you creating that file. Leave blank to
+                skip SonarCloud.
+              </span>
+            </label>
           </div>
+
+          {preflight && (!preflight.hasPackageJson || !preflight.hasSrcDir) && (
+            <div className="rounded-lg border border-gate-warn/40 bg-gate-warn/10 p-3 text-xs text-gate-warn">
+              <p className="font-semibold">This repo may not produce a passing run yet:</p>
+              <ul className="mt-1 list-disc pl-5">
+                {!preflight.hasPackageJson && (
+                  <li>
+                    no <span className="font-mono">package.json</span> — the gate runs{" "}
+                    <span className="font-mono">jest</span>, so tests and coverage will fail until
+                    this repo is an npm project
+                  </li>
+                )}
+                {!preflight.hasSrcDir && (
+                  <li>
+                    no <span className="font-mono">src/</span> directory — the gate only reviews
+                    changed <span className="font-mono">.js/.ts/.jsx/.tsx</span> files under{" "}
+                    <span className="font-mono">src/</span>
+                  </li>
+                )}
+              </ul>
+              <p className="mt-1">You can still install now and add these later.</p>
+            </div>
+          )}
 
           <div className="rounded-xl border border-gate-border bg-gate-accentSoft/40 p-4 text-xs text-gate-muted">
             Installing makes one commit to <code className="text-gate-text">{defaultBranch}</code> with:

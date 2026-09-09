@@ -63,6 +63,10 @@ secrets on the target repo — they never touch the console's environment.
   **SonarCloud token**. The console encrypts them with the repo's Actions public
   key (libsodium sealed box, via `tweetnacl-sealedbox-js`) and uploads them as
   `GEMINI_API_KEY` / `SONAR_TOKEN`. The console keeps no copy.
+- **SonarCloud organization** (optional) — when given alongside a token, the
+  console also commits `sonar-project.properties`
+  (`sonar.projectKey=<org>_<repo>`, the SonarCloud GitHub-import convention) so
+  the gate can query SonarCloud without the user hand-authoring that file.
 
 Installing makes **one commit** to the default branch with:
 
@@ -70,6 +74,7 @@ Installing makes **one commit** to the default branch with:
 | --- | --- |
 | `.github/workflows/quality-gate.yml` | Runs on the configured `push` / `pull_request` events. |
 | `config_cov.json` | `{ "global": 80, "files": { "src/x.js": 50 } }` — the coverage targets. |
+| `sonar-project.properties` | Only when a SonarCloud org is supplied — points the gate at `<org>_<repo>`. |
 
 That's it — no action code is copied into the repo.
 

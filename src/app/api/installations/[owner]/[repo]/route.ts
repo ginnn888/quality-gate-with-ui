@@ -5,6 +5,7 @@ import {
   commitFiles,
   deleteFiles,
   getContentMeta,
+  getFileText,
   listIssueComments,
   listOpenPullRequests,
   listWorkflowRuns,
@@ -16,10 +17,13 @@ import {
   CONFIG_PATH,
   LEGACY_PATHS,
   MANAGED_PATHS,
+  SONAR_PROPS_PATH,
   WORKFLOW_PATH,
   buildCoverageConfigJson,
+  buildSonarPropertiesFile,
   buildWorkflowYaml,
   normalizeCoverageConfig,
+  normalizeSonarOrg,
   normalizeTriggers,
 } from "@/lib/workflowTemplate";
 import { installError } from "@/lib/apiErrors";
@@ -135,6 +139,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     triggers?: unknown;
     geminiApiKey?: string;
     sonarToken?: string;
+    sonarOrg?: string;
   } | null;
 
   const coverage = normalizeCoverageConfig(body?.coverage ?? record.coverage);
@@ -142,17 +147,24 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const branch = record.defaultBranch;
 
   try {
-    await commitFiles(
-      token,
-      owner,
-      repo,
-      branch,
-      [
-        { path: WORKFLOW_PATH, contentUtf8: buildWorkflowYaml(triggers) },
-        { path: CONFIG_PATH, contentUtf8: buildCoverageConfigJson(coverage) },
-      ],
-      "Update Automated Quality Gate",
+    const files = [
+      { path: WORKFLOW_PATH, contentUtf8: buildWorkflowYaml(triggers) },
+      { path: CONFIG_PATH, contentUtf8: buildCoverageConfigJson(coverage) },
+    ];
+
+    // Keep sonar-project.properties in sync when it already exists, or add it
+    // now if this Save supplies a SonarCloud org. The org is taken from the
+    // request, falling back to whatever the committed file already declares.
+    const existingProps = await getFileText(token, owner, repo, SONAR_PROPS_PATH, branch).catch(
+      () => null,
     );
+    const orgFromFile = existingProps?.match(/^\s*sonar\.organization\s*=\s*(\S+)/m)?.[1] ?? "";
+    const sonarOrg = normalizeSonarOrg(body?.sonarOrg || orgFromFile);
+    if (sonarOrg && (existingProps != null || body?.sonarOrg)) {
+      files.push({ path: SONAR_PROPS_PATH, contentUtf8: buildSonarPropertiesFile(sonarOrg, repo) });
+    }
+
+    await commitFiles(token, owner, repo, branch, files, "Update Automated Quality Gate");
 
     const warnings: string[] = [];
     for (const [name, value] of [
