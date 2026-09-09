@@ -217,7 +217,8 @@ export default function InstallationDetailPage() {
               Saving re-commits <span className="font-mono">config_cov.json</span> and{" "}
               <span className="font-mono">.github/workflows/quality-gate.yml</span> — use it to pull
               in console updates too. The gate itself is always fetched fresh from{" "}
-              <span className="font-mono">ginnn888/aqg-github-marketplace</span> at run time.
+              <span className="font-mono">NonnaritRammaneekultawat-6609650459/test-github-marketplace</span> at
+              run time.
             </p>
           </div>
 

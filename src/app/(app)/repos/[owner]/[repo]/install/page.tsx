@@ -171,7 +171,8 @@ export default function InstallPage() {
             </ul>
             <p className="mt-2">
               The workflow runs the gate straight from{" "}
-              <span className="font-mono">ginnn888/aqg-github-marketplace</span> — nothing else is
+              <span className="font-mono">NonnaritRammaneekultawat-6609650459/test-github-marketplace</span> —
+              nothing else is
               added to your repo, and every run uses the current version of the gate.
             </p>
             <p className="mt-2">

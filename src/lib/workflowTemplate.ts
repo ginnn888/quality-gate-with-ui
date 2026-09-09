@@ -6,14 +6,15 @@ import type { CoverageConfig, GateEvent, WorkflowTriggers } from "./types";
 //
 // The analysis itself is NOT vendored into the repo. The workflow calls the
 // Automated Quality Gate straight from its source repository with
-// `uses: ginnn888/aqg-github-marketplace@<ref>`, so every run pulls the current
-// version of the gate and there is nothing to keep in sync.
+// `uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@<ref>`, so
+// every run pulls the current version of the gate and there is nothing to keep
+// in sync.
 
 export const WORKFLOW_PATH = ".github/workflows/quality-gate.yml";
 export const CONFIG_PATH = "config_cov.json";
 
 /** The Automated Quality Gate action, consumed directly from its repo. */
-export const AQG_ACTION_REPO = "ginnn888/aqg-github-marketplace";
+export const AQG_ACTION_REPO = "NonnaritRammaneekultawat-6609650459/test-github-marketplace";
 /** Git ref of the action to pin the workflow to. `main` tracks the latest gate. */
 export const AQG_ACTION_REF = (process.env.AQG_ACTION_REF || "main").trim() || "main";
 /** `owner/repo@ref` as it appears in the generated `uses:` line. */

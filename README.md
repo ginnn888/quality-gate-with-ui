@@ -7,8 +7,8 @@ any analysis itself — it is purely the front door:
 2. **Install** the gate onto a repository — the console commits a workflow file
    and a `config_cov.json`, and sets the repo secrets the action needs. The
    workflow calls the gate straight from
-   [`ginnn888/aqg-github-marketplace`](https://github.com/ginnn888/aqg-github-marketplace)
-   (`uses: ginnn888/aqg-github-marketplace@main`) — nothing else is written into
+   [`NonnaritRammaneekultawat-6609650459/test-github-marketplace`](https://github.com/NonnaritRammaneekultawat-6609650459/test-github-marketplace)
+   (`uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@main`) — nothing else is written into
    the repo.
 3. **Tune** the coverage thresholds from the web; saving re-commits
    `config_cov.json` to the repo.
@@ -84,7 +84,7 @@ provision, nothing to persist.
 ### The generated workflow
 
 `.github/workflows/quality-gate.yml` mirrors
-[`ginnn888/aqg-github-marketplace`](https://github.com/ginnn888/aqg-github-marketplace)'s
+[`NonnaritRammaneekultawat-6609650459/test-github-marketplace`](https://github.com/NonnaritRammaneekultawat-6609650459/test-github-marketplace)'s
 own `ci.yaml` — checkout (`fetch-depth: 0`), Node 20, a tolerant
 `npm ci`/`install`/skip, an optional SonarCloud scan (only when a `SONAR_TOKEN`
 repo secret is set), then the gate itself:
@@ -92,7 +92,7 @@ repo secret is set), then the gate itself:
 ```yaml
       - name: Automated Quality Gate
         if: always()
-        uses: ginnn888/aqg-github-marketplace@main
+        uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@main
         with:
           gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
           sonar_token: ${{ secrets.SONAR_TOKEN }}
@@ -157,12 +157,12 @@ src/
     github.ts                GitHub REST client (repos, contents R/W, runs, PRs, comments, secrets)
     githubSecrets.ts         sealed-box encryption for repo Actions secrets
     installations.ts         derives the installed view from a repo's own contents
-    workflowTemplate.ts      builds quality-gate.yml (uses: ginnn888/aqg-github-marketplace@<ref>)
+    workflowTemplate.ts      builds quality-gate.yml (uses: NonnaritRammaneekultawat-6609650459/test-github-marketplace@<ref>)
                              + config_cov.json
     apiErrors.ts             maps GitHub write failures (esp. missing `workflow` scope)
     types.ts                 CoverageConfig / WorkflowTriggers / InstalledRepo / GatePrResult
 ```
 
 The gate's own source lives in its repo:
-<https://github.com/ginnn888/aqg-github-marketplace>. The console never bundles or
+<https://github.com/NonnaritRammaneekultawat-6609650459/test-github-marketplace>. The console never bundles or
 runs it — it only writes the workflow that calls it.

@@ -29,7 +29,10 @@ export default async function DashboardPage() {
           </h1>
           <p className="mt-1 text-sm text-gate-muted">
             Repositories running the Automated Quality Gate — pulled from{" "}
-            <span className="font-mono text-gate-text">ginnn888/aqg-github-marketplace</span> — on
+            <span className="font-mono text-gate-text">
+              NonnaritRammaneekultawat-6609650459/test-github-marketplace
+            </span>{" "}
+            — on
             every push and pull request. Open one to tune coverage, manage secrets, or read the
             latest PR results.
           </p>
