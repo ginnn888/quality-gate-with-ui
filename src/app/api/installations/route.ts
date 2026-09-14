@@ -1,15 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { commitFiles, getRepo } from "@/lib/github";
-import { getInstalledRepo, listInstalledRepos } from "@/lib/installations";
-import { setRepoSecret } from "@/lib/githubSecrets";
+import { GitHubError, commitFiles, getContentMeta, getRepo, requireStatusCheck } from "@/lib/github";
+import { getInstalledRepo } from "@/lib/installations";
+import { applyRepoSecrets, buildManagedFiles } from "@/lib/installWrite";
 import {
-  buildCoverageConfigJson,
-  buildSonarPropertiesFile,
-  buildWorkflowYaml,
-  CONFIG_PATH,
-  SONAR_PROPS_PATH,
-  WORKFLOW_PATH,
+  AUDIT_RESOLVE_PATH,
+  GATE_CHECK_CONTEXT,
+  buildAuditResolveStub,
   normalizeCoverageConfig,
   normalizeSonarOrg,
   normalizeTriggers,
@@ -18,20 +15,6 @@ import { installError } from "@/lib/apiErrors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-// GET /api/installations — every repo the user can reach that has the gate installed.
-export async function GET() {
-  const session = await auth();
-  if (!session?.accessToken) {
-    return NextResponse.json({ error: "Sign in with GitHub required" }, { status: 401 });
-  }
-  try {
-    const installations = await listInstalledRepos(session.accessToken);
-    return NextResponse.json({ installations });
-  } catch (e) {
-    return installError(e);
-  }
-}
 
 // POST /api/installations — commit the workflow + config_cov.json into a repo
 // (one commit) and set the GEMINI_API_KEY / SONAR_TOKEN repo secrets the gate
@@ -53,7 +36,7 @@ export async function POST(req: NextRequest) {
     geminiApiKey?: string;
     sonarToken?: string;
     sonarOrg?: string;
-    openTestsPr?: boolean;
+    requireCheck?: boolean;
   } | null;
 
   if (!body?.owner || !body?.repo) {
@@ -63,16 +46,16 @@ export async function POST(req: NextRequest) {
   const repo = String(body.repo).trim();
   const coverage = normalizeCoverageConfig(body.coverage);
   const triggers = normalizeTriggers(body.triggers);
+  const requireCheck = body.requireCheck === true;
 
   // The console's own env vars are the fallback for both secrets.
   const geminiApiKey = (body.geminiApiKey ?? "").trim() || (process.env.GEMINI_API_KEY ?? "").trim();
   const sonarToken = (body.sonarToken ?? "").trim() || (process.env.SONAR_TOKEN ?? "").trim();
-  // Optional. When present alongside a token, the console also commits
-  // sonar-project.properties so the gate can query SonarCloud without the user
-  // hand-authoring that file.
-  const sonarOrg = normalizeSonarOrg(body.sonarOrg ?? process.env.SONAR_ORGANIZATION);
-  const openTestsPr =
-    body.openTestsPr ?? String(process.env.AQG_OPEN_TESTS_PR).toLowerCase() === "true";
+  // Optional, and only ever from the wizard — never a console-wide env fallback:
+  // sonar-project.properties is per-repo and pointing it at the wrong org
+  // silently breaks the scan. When present alongside a token the console commits
+  // the file so the gate can query SonarCloud without hand-authoring it.
+  const sonarOrg = normalizeSonarOrg(body.sonarOrg);
 
   try {
     const meta = await getRepo(token, owner, repo);
@@ -84,36 +67,41 @@ export async function POST(req: NextRequest) {
     }
     const branch = meta.defaultBranch;
 
-    const files = [
-      { path: WORKFLOW_PATH, contentUtf8: buildWorkflowYaml(triggers, { openTestsPr }) },
-      { path: CONFIG_PATH, contentUtf8: buildCoverageConfigJson(coverage) },
-    ];
     const writesSonarProps = Boolean(sonarToken && sonarOrg);
-    if (writesSonarProps) {
-      files.push({
-        path: SONAR_PROPS_PATH,
-        contentUtf8: buildSonarPropertiesFile(sonarOrg, repo),
-      });
+    const files = buildManagedFiles({
+      triggers,
+      coverage,
+      repo,
+      sonarOrg,
+      writeSonarProps: writesSonarProps,
+    });
+
+    // Seed an empty audit-resolve.json when the repo has none, so there is a
+    // place to whitelist npm advisories the gate would otherwise fail on.
+    const hasAuditResolve = await getContentMeta(
+      token,
+      owner,
+      repo,
+      AUDIT_RESOLVE_PATH,
+      branch,
+    ).catch(() => null);
+    if (!hasAuditResolve) {
+      files.push({ path: AUDIT_RESOLVE_PATH, contentUtf8: buildAuditResolveStub() });
     }
 
     await commitFiles(token, owner, repo, branch, files, "Install Automated Quality Gate");
 
-    const warnings: string[] = [];
-    for (const [name, value] of [
-      ["GEMINI_API_KEY", geminiApiKey],
-      ["SONAR_TOKEN", sonarToken],
-    ] as const) {
-      if (!value) continue;
-      try {
-        await setRepoSecret(token, owner, repo, name, value);
-      } catch (e) {
-        warnings.push(
-          `Committed the files, but could not set the ${name} secret (${
-            (e as Error).message
-          }). Add it under Settings → Secrets and variables → Actions.`,
-        );
-      }
-    }
+    const warnings = await applyRepoSecrets(
+      token,
+      owner,
+      repo,
+      [
+        { name: "GEMINI_API_KEY", value: geminiApiKey },
+        { name: "SONAR_TOKEN", value: sonarToken },
+      ],
+      (name, message) =>
+        `Committed the files, but could not set the ${name} secret (${message}). Add it under Settings → Secrets and variables → Actions.`,
+    );
     if (!geminiApiKey) {
       warnings.push(
         "No Gemini API key available (none provided and GEMINI_API_KEY is not set on the console) — the gate cannot run until that repo secret is set.",
@@ -123,6 +111,19 @@ export async function POST(req: NextRequest) {
       warnings.push(
         "SONAR_TOKEN is set but no SonarCloud organization was provided, so sonar-project.properties was not written — the gate will skip SonarCloud until that file exists.",
       );
+    }
+
+    if (requireCheck) {
+      try {
+        await requireStatusCheck(token, owner, repo, branch, GATE_CHECK_CONTEXT);
+      } catch (e) {
+        const admin = e instanceof GitHubError && e.status === 403;
+        warnings.push(
+          admin
+            ? `Installed, but could not require the "${GATE_CHECK_CONTEXT}" check on ${branch} — that needs admin on the repo. Add it under Settings → Branches → Branch protection rules.`
+            : `Installed, but could not set branch protection (${(e as Error).message}).`,
+        );
+      }
     }
 
     const record = await getInstalledRepo(token, owner, repo);

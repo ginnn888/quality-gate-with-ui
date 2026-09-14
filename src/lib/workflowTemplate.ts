@@ -12,6 +12,10 @@ import type { CoverageConfig, GateEvent, WorkflowTriggers } from "./types";
 
 export const WORKFLOW_PATH = ".github/workflows/quality-gate.yml";
 export const CONFIG_PATH = "config_cov.json";
+// The gate fails on any high/critical `npm audit` advisory. This file is where
+// a repo whitelists advisories it has accepted: {"decisions":[{"id":1234567}]}.
+// The console seeds an empty one on install so there is somewhere to add them.
+export const AUDIT_RESOLVE_PATH = "audit-resolve.json";
 // Only committed when a SonarCloud organization is supplied at install/update
 // time. The Automated Quality Gate action reads `sonar.projectKey` from this
 // file to query the SonarCloud API; without it the action skips SonarCloud.
@@ -19,10 +23,22 @@ export const SONAR_PROPS_PATH = "sonar-project.properties";
 
 /** The Automated Quality Gate action, consumed directly from its repo. */
 export const AQG_ACTION_REPO = "NonnaritRammaneekultawat-6609650459/test-github-marketplace";
-/** Git ref of the action to pin the workflow to. `main` tracks the latest gate. */
-export const AQG_ACTION_REF = (process.env.AQG_ACTION_REF || "main").trim() || "main";
+/**
+ * Git ref of the action the workflow is pinned to. A released tag by default so
+ * one bad commit on the action's `main` can't break every install at once —
+ * set `AQG_ACTION_REF` to `main`, another tag, or a commit SHA to change it.
+ * The action repo's tags are unprefixed (`1.1`, `1.0`), not `v1.x`.
+ */
+export const AQG_ACTION_REF = (process.env.AQG_ACTION_REF || "1.1").trim() || "1.1";
 /** `owner/repo@ref` as it appears in the generated `uses:` line. */
 export const AQG_ACTION_USES = `${AQG_ACTION_REPO}@${AQG_ACTION_REF}`;
+
+/**
+ * The status-check context the generated workflow reports under — i.e. the
+ * job's `name:`. This is the string a branch-protection rule must require to
+ * block merges on a red gate.
+ */
+export const GATE_CHECK_CONTEXT = "Quality Gate";
 
 /** Every file the console may write into a target repo, for drift checks + uninstall. */
 export const MANAGED_PATHS = [WORKFLOW_PATH, CONFIG_PATH, SONAR_PROPS_PATH];
@@ -35,9 +51,12 @@ export const MANAGED_PATHS = [WORKFLOW_PATH, CONFIG_PATH, SONAR_PROPS_PATH];
 export const LEGACY_PATHS = [".quality-gate/action.yml", ".quality-gate/dist/index.js"];
 
 export const DEFAULT_COVERAGE: CoverageConfig = { global: 80, files: {} };
+// pull_request only by default: the Automated Quality Gate posts its AI report
+// (and this console reads it back) only on pull_request events. On push it just
+// sets a pass/fail status with no report.
 export const DEFAULT_TRIGGERS: WorkflowTriggers = {
   branches: ["main"],
-  events: ["push", "pull_request"],
+  events: ["pull_request"],
 };
 
 const clampInt = (n: unknown, lo: number, hi: number, fallback: number) => {
@@ -94,6 +113,11 @@ export function buildCoverageConfigJson(cfg: CoverageConfig): string {
   return JSON.stringify({ global: cfg.global, files: cfg.files }, null, 2) + "\n";
 }
 
+/** An empty `audit-resolve.json` — a place for the repo to whitelist advisories. */
+export function buildAuditResolveStub(): string {
+  return JSON.stringify({ decisions: [] }, null, 2) + "\n";
+}
+
 /** A SonarCloud organization key looks like `my-org` / `ginnn888` — no spaces. */
 export function normalizeSonarOrg(input: unknown): string {
   const s = String(input ?? "").trim();
@@ -117,20 +141,10 @@ export function buildSonarPropertiesFile(org: string, repo: string): string {
 
 const yamlList = (items: string[]) => `[${items.map((b) => JSON.stringify(b)).join(", ")}]`;
 
-export interface WorkflowOptions {
-  /**
-   * When true, the gate also publishes the AI-generated tests + merged
-   * config_cov.json + report to `aqg-tests/pr-<n>` and opens/refreshes a
-   * companion PR on every pull_request run. Needs `contents: write`.
-   */
-  openTestsPr?: boolean;
-}
-
 /** The `.github/workflows/quality-gate.yml` committed to the target repo. */
-export function buildWorkflowYaml(triggers: WorkflowTriggers, opts: WorkflowOptions = {}): string {
+export function buildWorkflowYaml(triggers: WorkflowTriggers): string {
   const events = triggers.events.length ? triggers.events : DEFAULT_TRIGGERS.events;
   const branches = triggers.branches.length ? triggers.branches : DEFAULT_TRIGGERS.branches;
-  const openTestsPr = Boolean(opts.openTestsPr);
 
   const on = events
     .map((e: GateEvent) => `  ${e}:\n    branches: ${yamlList(branches)}`)
@@ -139,38 +153,42 @@ export function buildWorkflowYaml(triggers: WorkflowTriggers, opts: WorkflowOpti
   return `# Managed by the Quality Gate console — reconfigure or remove it from the console.
 # The analysis is the Automated Quality Gate, pulled straight from
 # github.com/${AQG_ACTION_REPO} on every run (ref: ${AQG_ACTION_REF}).
-name: Quality Gate
+name: Automated Quality Gate
 
 on:
 ${on}
 
 permissions:
-  contents: ${openTestsPr ? "write" : "read"}
+  contents: read
   pull-requests: write
   statuses: write
   checks: write
 
 jobs:
   quality-gate:
+    # This name is the status-check context a branch-protection rule requires.
+    name: ${GATE_CHECK_CONTEXT}
     runs-on: ubuntu-latest
     env:
       # Job-level so the SonarCloud step's \`if:\` can see whether the secret is set.
       SONAR_TOKEN: \${{ secrets.SONAR_TOKEN }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
+          # The gate diffs against the PR base branch — it needs full history.
           fetch-depth: 0
 
       # No \`cache: npm\` here on purpose — the gate installs onto arbitrary repos,
       # and setup-node's cache errors when there is no lockfile anywhere.
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '20'
 
-      # Only when this repo is actually an npm project. A repo without a
-      # package.json still runs the gate — it just has nothing to test.
+      # The gate runs \`npx jest --coverage\` in THIS repo, so jest must resolve
+      # here. A repo without a package.json still runs the gate — it just has
+      # nothing to test and reports "skipped".
       - name: Install dependencies
         run: |
           if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
@@ -200,6 +218,20 @@ jobs:
           gemini_api_key: \${{ secrets.GEMINI_API_KEY }}
           sonar_token: \${{ secrets.SONAR_TOKEN }}
           github_token: \${{ secrets.GITHUB_TOKEN }}
-          open_tests_pr: "${openTestsPr ? "true" : "false"}"
+
+      # The gate writes the AI-generated tests to Test/ and the coverage report
+      # to coverage/ on the runner, then both are deleted with it — the PR
+      # comment only ever shows a summary table, never the actual test code.
+      # Upload them as a downloadable build artifact so they aren't lost.
+      - name: Upload generated tests + coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-gate-output-\${{ github.run_id }}
+          path: |
+            Test/
+            coverage/
+          if-no-files-found: ignore
+          retention-days: 14
 `;
 }

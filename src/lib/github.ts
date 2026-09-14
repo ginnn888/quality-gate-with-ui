@@ -110,7 +110,8 @@ export async function listUserRepos(token: string, perPage = 100): Promise<GitHu
 /**
  * Search within the repositories the user can access. GitHub's search API needs
  * an explicit `user:` qualifier to include private repos, so the query is
- * scoped to the signed-in login.
+ * scoped to the signed-in login. Any `user:` / `org:` / `repo:` qualifier the
+ * caller typed is stripped first so the search can't be steered off that login.
  */
 export async function searchUserRepos(
   token: string,
@@ -118,7 +119,8 @@ export async function searchUserRepos(
   query: string,
   perPage = 50,
 ): Promise<GitHubRepo[]> {
-  const q = `${query} user:${login} fork:true`;
+  const cleaned = query.replace(/\b(?:user|org|repo):\S+/gi, "").trim();
+  const q = `${cleaned} user:${login} fork:true`.trim();
   const data = await gh<{ items: any[] }>(
     token,
     `/search/repositories?q=${encodeURIComponent(q)}&per_page=${perPage}`,
@@ -326,7 +328,20 @@ export async function listWorkflowRuns(
       workflowFile,
     )}/runs?per_page=${perPage}`,
   );
-  return (data.workflow_runs ?? []).map(mapRun).map((r) => ({ ...r, headSha: r.headSha.slice(0, 40) }));
+  return (data.workflow_runs ?? []).map(mapRun);
+}
+
+/**
+ * Permanently delete one workflow run and its logs. GitHub 409s on a run that
+ * is still in progress — callers should skip non-completed runs.
+ */
+export async function deleteWorkflowRun(
+  token: string,
+  owner: string,
+  repo: string,
+  runId: number,
+): Promise<void> {
+  await ghSend(token, "DELETE", `/repos/${owner}/${repo}/actions/runs/${runId}`, undefined);
 }
 
 // ── Actions: secrets (encrypted writes) ────────────────────────────────────
@@ -429,6 +444,137 @@ export async function listIssueComments(
     createdAt: c.created_at ?? "",
     updatedAt: c.updated_at ?? "",
   }));
+}
+
+// ── branch protection: require the gate status check ──────────────────────
+
+/**
+ * Whether `branch` already requires `context` as a passing status check before
+ * merge. `readable: false` when the token can't see protection (needs admin).
+ */
+export async function getRequiredCheckState(
+  token: string,
+  owner: string,
+  repo: string,
+  branch: string,
+  context: string,
+): Promise<{ readable: boolean; required: boolean }> {
+  try {
+    const data = await gh<{ contexts?: string[]; checks?: { context: string }[] }>(
+      token,
+      `/repos/${owner}/${repo}/branches/${encodeURIComponent(
+        branch,
+      )}/protection/required_status_checks`,
+    );
+    const contexts = new Set([
+      ...(data.contexts ?? []),
+      ...(data.checks ?? []).map((c) => c.context),
+    ]);
+    return { readable: true, required: contexts.has(context) };
+  } catch (e) {
+    // 404 = no protection / no required checks, but the token could read it.
+    if (e instanceof GitHubError && e.status === 404) return { readable: true, required: false };
+    // 403 = the token lacks admin on the repo.
+    if (e instanceof GitHubError && e.status === 403) return { readable: false, required: false };
+    throw e;
+  }
+}
+
+/** Reshape a GET /protection body into a PUT /protection body, preserving
+ *  whatever rule is already there. */
+function protectionGetToPut(cur: any, requiredContexts: string[]): Record<string, unknown> {
+  const restr = cur?.restrictions;
+  return {
+    required_status_checks: {
+      strict: Boolean(cur?.required_status_checks?.strict),
+      contexts: requiredContexts,
+    },
+    enforce_admins: Boolean(cur?.enforce_admins?.enabled) || null,
+    required_pull_request_reviews: cur?.required_pull_request_reviews
+      ? {
+          dismiss_stale_reviews: Boolean(cur.required_pull_request_reviews.dismiss_stale_reviews),
+          require_code_owner_reviews: Boolean(
+            cur.required_pull_request_reviews.require_code_owner_reviews,
+          ),
+          required_approving_review_count:
+            cur.required_pull_request_reviews.required_approving_review_count ?? 0,
+        }
+      : null,
+    restrictions: restr
+      ? {
+          users: (restr.users ?? []).map((u: any) => u.login),
+          teams: (restr.teams ?? []).map((t: any) => t.slug),
+          apps: (restr.apps ?? []).map((a: any) => a.slug),
+        }
+      : null,
+  };
+}
+
+/**
+ * Add `context` to `branch`'s required status checks, creating a minimal
+ * protection rule if the branch has none. Needs admin on the repo (surfaces as
+ * a GitHubError with status 403).
+ */
+export async function requireStatusCheck(
+  token: string,
+  owner: string,
+  repo: string,
+  branch: string,
+  context: string,
+): Promise<void> {
+  const prot = `/repos/${owner}/${repo}/branches/${encodeURIComponent(branch)}/protection`;
+  try {
+    // Fast path: append the context, leaving every other protection setting alone.
+    await ghSend(token, "POST", `${prot}/required_status_checks/contexts`, [context]);
+    return;
+  } catch (e) {
+    if (!(e instanceof GitHubError) || e.status !== 404) throw e;
+  }
+  // 404 → the branch has no `required_status_checks` block yet.
+  const current = await gh<any>(token, prot).catch((e) => {
+    if (e instanceof GitHubError && e.status === 404) return null;
+    throw e;
+  });
+  if (current) {
+    const existing: string[] = [
+      ...(current.required_status_checks?.contexts ?? []),
+      ...(current.required_status_checks?.checks ?? []).map((c: any) => c.context),
+    ];
+    await ghSend(token, "PUT", prot, protectionGetToPut(current, [...new Set([...existing, context])]));
+  } else {
+    await ghSend(token, "PUT", prot, {
+      required_status_checks: { strict: false, contexts: [context] },
+      enforce_admins: null,
+      required_pull_request_reviews: null,
+      restrictions: null,
+    });
+  }
+}
+
+/**
+ * Remove `context` from `branch`'s required status checks, leaving the rest of
+ * the protection rule intact. No-op when it wasn't required. Needs admin.
+ */
+export async function unrequireStatusCheck(
+  token: string,
+  owner: string,
+  repo: string,
+  branch: string,
+  context: string,
+): Promise<void> {
+  try {
+    await ghSend(
+      token,
+      "DELETE",
+      `/repos/${owner}/${repo}/branches/${encodeURIComponent(
+        branch,
+      )}/protection/required_status_checks/contexts`,
+      [context],
+    );
+  } catch (e) {
+    if (e instanceof GitHubError && e.status === 404) return;
+    throw e;
+  }
 }
 
 // ── small concurrency helper ──────────────────────────────────────────────

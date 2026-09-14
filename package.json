@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "description": "Web UI for the Automated Quality Gate — upload code, run the gate, read the report without touching GitHub.",
+  "engines": {
+    "node": ">=20 <21"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
