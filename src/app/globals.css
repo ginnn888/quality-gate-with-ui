@@ -1,3 +1,7 @@
+/* Global stylesheet, imported once from app/layout.tsx. Tailwind's layers
+   plus two hand-written pieces below: the page background (a fixed radial
+   gradient in the app's accent/blue/green colors) and .md-report, which
+   styles the gate's Markdown report wherever <MarkdownReport> renders it. */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

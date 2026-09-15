@@ -1,5 +1,10 @@
 "use client";
 
+// Renders the gate's PR comment (the `# 🚀 AI-Powered Quality Gate Report`
+// body) as formatted Markdown, with a "copy markdown" button for pasting it
+// elsewhere. Uses react-markdown, which escapes HTML itself — this never
+// touches `dangerouslySetInnerHTML`, so it's safe even though the markdown
+// text ultimately comes from a GitHub comment body, not code we wrote.
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";

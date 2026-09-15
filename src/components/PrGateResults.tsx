@@ -1,5 +1,10 @@
 "use client";
 
+// One row per open PR on the installation detail page: a PASS/FAIL/SKIPPED
+// badge (parsed from the report text by installations.ts), the workflow run
+// status, and — on click — the full report inline via <MarkdownReport>. A PR
+// the gate hasn't commented on yet just shows "No report yet" with expand
+// disabled; there's nothing to open.
 import { useState } from "react";
 import {
   CheckCircle2,

@@ -1,3 +1,8 @@
+// The only entry point for a signed-out visitor — outside the (app)/ route
+// group, so it renders with no sidebar. Already-signed-in users are bounced
+// straight to wherever they were headed (`callbackUrl`, set by middleware.ts
+// when it redirected them here in the first place).
+
 import { redirect } from "next/navigation";
 import { GitBranch, MessageSquareCode, PackageCheck, ShieldCheck } from "lucide-react";
 import { auth } from "@/lib/auth";

@@ -1,3 +1,6 @@
+// One card on the dashboard ("/") per repo that has the gate installed —
+// purely presentational, `row` is already the fully-derived summary from
+// listInstalledRepos(). Links into that repo's detail page.
 import Link from "next/link";
 import { GitBranch, Globe2, Lock } from "lucide-react";
 import type { InstalledRepoSummary } from "@/lib/types";

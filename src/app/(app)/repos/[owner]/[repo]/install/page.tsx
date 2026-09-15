@@ -1,3 +1,10 @@
+// "/repos/[owner]/[repo]/install" — server half of the install wizard.
+// Reads the repo's branches + preflight signals (package.json / src/ / jest)
+// once, server-side, then hands them to <InstallWizard>, which owns the form
+// state and the POST that actually installs the gate. If the repo can't be
+// read at all (e.g. no access), this renders an inline error instead of the
+// form — there's nothing to configure for a repo we can't see.
+
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";

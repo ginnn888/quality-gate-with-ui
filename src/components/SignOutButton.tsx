@@ -1,3 +1,7 @@
+// A plain HTML <form> posting to the signOutAction server action, not an
+// onClick handler — works even before client JS has hydrated, and matches
+// how Sign in is done (see GitHubSignInButton's comment for why sign-in
+// itself can't use the same server-action approach).
 import { LogOut } from "lucide-react";
 import { signOutAction } from "@/lib/authActions";
 

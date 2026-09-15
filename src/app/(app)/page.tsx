@@ -1,3 +1,8 @@
+// "/" — the dashboard. A Server Component: it calls listInstalledRepos()
+// directly (no client-side fetch, no loading spinner on first paint) and
+// renders one InstalledRepoCard per repo that already has the gate. This page
+// has no client half — there is nothing on it to click that needs local state.
+
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { PackageCheck, Plus } from "lucide-react";
@@ -5,6 +10,8 @@ import { auth } from "@/lib/auth";
 import { listInstalledRepos } from "@/lib/installations";
 import { InstalledRepoCard } from "@/components/InstalledRepoCard";
 
+// Force per-request rendering: this page reads the signed-in user's own
+// repos, so it must never be cached/reused across different users.
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
